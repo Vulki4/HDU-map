@@ -1,0 +1,106 @@
+{
+  "date": "2026-10-21",
+  "stack": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "node": ">=24.0.0",
+    "storage": "SQLite via node:sqlite",
+    "api": "v1"
+  },
+  "nodeServer": "server.mjs",
+  "tests": {
+    "routeConnections": 121,
+    "routeGeometryMatchesLegacy": 121,
+    "rooms": 170,
+    "floors": 13,
+    "command": "pnpm test",
+    "status": "passed",
+    "passed": 97,
+    "failed": 0,
+    "mapCanvasEventChecks": 20
+  },
+  "changes": [
+    "React component architecture",
+    "Node.js dev and production server",
+    "Vite production build",
+    "Stable SVG room hitboxes and bubble hover",
+    "Bilingual controlled room pickers",
+    "Accessible focus and reduced-motion behavior",
+    "SQLite persistence with first-run transactional seed",
+    "Validated API v1 for maps, floors, global bilingual search and canonical routes",
+    "Public projection excludes areas and original-plan provenance",
+    "React API client and asynchronous loading/error handling",
+    "Stale route cancellation preserves current endpoints, language and planner state",
+    "Static stream pipeline closes file descriptors after client disconnects",
+    "Separate bilingual admin panel with room number and Russian/Kazakh label editing",
+    "SQLite schema 1 to 2 migration, credentials and room change history",
+    "Cookie sessions, CSRF and origin validation, bounded password authentication",
+    "Optimistic revisions and duplicate-number validation",
+    "Student map, search and picked endpoints refresh after admin edits"
+  ],
+  "dataChanged": false,
+  "browserLayoutVerified": false,
+  "limits": [
+    "Physical room numbers and passages require university verification",
+    "No live browser layout or real-device verification",
+    "No load test",
+    "No inter-building route or indoor geolocation",
+    "One shared administrator password; separate user accounts and password recovery are not implemented",
+    "Static dist alone requires the Node API to function"
+  ],
+  "backend": {
+    "repository": "server/repository.js",
+    "handler": "server/api.js",
+    "database": "var/hdu-map.sqlite",
+    "initialSeedOnly": true,
+    "restartOverwritesSeed": false,
+    "publicApiWrites": false,
+    "jsonBodyLimitBytes": 8192,
+    "rateLimit": {
+      "maxRequests": 1000,
+      "windowMs": 60000,
+      "identity": "direct socket remoteAddress; no trust in X-Forwarded-For",
+      "healthExcluded": true
+    },
+    "defaultHost": "127.0.0.1",
+    "defaultPort": 8765,
+    "admin": {
+      "path": "/admin",
+      "handler": "server/admin-api.js",
+      "schemaVersion": 2,
+      "initialSetupLocalOnly": true,
+      "sessionDurationHours": 8,
+      "csrfProtection": true,
+      "passwordHash": "scrypt N=32768 r=8 p=3 with random 16-byte salt",
+      "history": true,
+      "optimisticConcurrency": true
+    }
+  },
+  "productionBuild": {
+    "passed": true,
+    "javascriptBytes": 272270,
+    "javascriptGzipBytes": 86330,
+    "adminJavascriptBytes": 27320,
+    "adminJavascriptGzipBytes": 8850,
+    "adminLazyLoaded": true,
+    "sizesApproximate": true
+  },
+  "liveHttpSmoke": {
+    "passed": true,
+    "base": "http://127.0.0.1:8765",
+    "storage": "sqlite",
+    "search305Floor": 3,
+    "routeFloors": [1, 2, 3],
+    "builtAssetsServed": true,
+    "databaseAndSourceFilesNotServed": true,
+    "adminPageStatus": 200,
+    "adminAssetsServed": true,
+    "unauthenticatedWriteStatus": 401,
+    "initialAdminSetupReady": true,
+    "liveSchemaVersion": 2,
+    "liveRoomMetadataEdited": false,
+    "unchangedLiveRevision": "f47cd3da69224a86a57037d827d3449ca099a6069b2373ee4865d7692724b954"
+  },
+  "loadTested": false,
+  "onsiteVerified": false
+}
