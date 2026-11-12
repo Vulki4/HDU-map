@@ -95,3 +95,10 @@ export function buildingFloorName(t, building, floor, short = false) {
   if (floor === 0) return t(short ? 'basementShort' : 'basement');
   return short ? String(floor) : t('floor', { n: floor });
 }
+
+export function hidesRoomNumber(room) {
+  if (room.hideNumber || room.type === 'wc' || room.type === 'corridor') return true;
+  const label = room.labelRu ?? room.label;
+  return /^(?:холл|вестибюль|спортзал|co-working|media hub|кабинет ректора|(?:служебное|подсобное|техническое|тех\.) помещение)$/iu.test(label)
+    || /(?:^|[\s-])зал(?:$|[\s-])/iu.test(label);
+}

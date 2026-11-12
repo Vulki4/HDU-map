@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ROOM_KK, buildingFloorName, makeTranslator } from './i18n.js';
+import { ROOM_KK, buildingFloorName, hidesRoomNumber, makeTranslator } from './i18n.js';
 import { buildCatalog, keyOf } from './map-core.js';
 import { loadMaps, createRoute } from './api-client.js';
 import useRoomSearch from './hooks/useRoomSearch.js';
@@ -10,7 +10,6 @@ import MapCanvas from './components/MapCanvas.jsx';
 
 const storage = { get(key) { try { return localStorage.getItem(key); } catch { return null; } }, set(key,value) { try { localStorage.setItem(key,value); } catch {} } };
 const pointIcon = point => <Icon type={roomIconType(point)} />;
-const hidesRoomNumber = room => room.type === 'wc';
 export function readView(search, maps) {
   const params = new URLSearchParams(search);
   const building = Object.hasOwn(maps,params.get('building')) ? params.get('building') : 'seven';

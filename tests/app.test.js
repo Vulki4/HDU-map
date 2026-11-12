@@ -189,11 +189,12 @@ test('React application supports student search and route workflows', async t =>
       assert.match(app.location.search,/building=udn2&floor=0/);
       const corridors=app.document.querySelectorAll('.map-room[data-type="corridor"]');
       assert.equal(corridors.length,1);
-      assert.equal(corridors[0].querySelectorAll('.room-label').length,1);
+      assert.equal(corridors[0].querySelector('.room-label').textContent,'Коридор');
       const parts=corridors[0].querySelectorAll('.room-hitbox');
       assert.equal(parts.length,1);
       await app.click(parts[0]);
-      assert.match(app.$('#detail').textContent,/Коридор.*по плану № 13/s);
+      assert.equal(app.$('#detail h3').textContent,'Коридор');
+      assert.doesNotMatch(app.$('#detail').textContent,/№/);
       const sanitaryZones=app.document.querySelectorAll('.map-room[data-type="wc"]');
       assert.equal(sanitaryZones.length,1);
       assert.ok(sanitaryZones[0].querySelector('.room-map-icon'));

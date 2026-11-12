@@ -3,7 +3,7 @@ import { buildCatalog, findRoute, searchRooms } from '../src/map-core.js';
 
 const PREFIX = '/api/v1';
 const BODY_LIMIT = 8 * 1024;
-const ROOM_FIELDS = ['id','number','label','labelRu','labelKk','type','x','y','w','h','cx','cy','points','polygons','start','door','partial'];
+const ROOM_FIELDS = ['id','number','hideNumber','label','labelRu','labelKk','type','x','y','w','h','cx','cy','points','polygons','start','door','partial'];
 const FLOOR_FIELDS = ['view','spineX','spineY','wide','partialAnnex'];
 const BUILDING_NAMES = {
   five: { code:'A', name:{ru:'А корпус',kk:'А корпусы'} },

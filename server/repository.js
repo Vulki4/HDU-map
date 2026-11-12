@@ -123,7 +123,7 @@ function seedDatabase(db, seed, udn2MergeRevision) {
 
 export function createMapRepository({ filename = path.join(dataDirectory, 'hdu-map.sqlite'), seed = MAPS } = {}) {
   const udn2RoomMerges = Object.entries(seed.udn2?.floors ?? {}).flatMap(([floor, data]) =>
-    data.rooms.filter(room => ['corridor', 'wc'].includes(room.type) && room.mergedRoomIds?.length)
+    data.rooms.filter(room => room.mergedRoomIds?.length)
       .map(room => ({ floor: Number(floor), room })),
   );
   const udn2MergeRevision = udn2RoomMerges.length
@@ -242,14 +242,15 @@ export function createMapRepository({ filename = path.join(dataDirectory, 'hdu-m
               if (previous?.type !== room.type || retired.some(source => !Number.isSafeInteger(source.id) || source.id === room.id || source.type !== previous.type)) {
                 throw new Error('UDN 2 room merge did not match the stored plan');
               }
-              const merged = { ...room, number: previous.number };
-              const { ru, kk } = room.type === 'wc' ? edits() : { ru: true, kk: true };
+              const number = room.hideNumber ? null : main.number;
+              const merged = { ...room, number: number ?? undefined };
+              const { ru, kk } = room.type === 'corridor' ? { ru: true, kk: true } : edits();
               if (ru) {
                 merged.label = previous.label;
                 merged.labelRu = previous.labelRu;
               }
               if (kk) merged.labelKk = previous.labelKk;
-              update.run(main.number, JSON.stringify(merged), 'udn2', floor, room.id);
+              update.run(number, JSON.stringify(merged), 'udn2', floor, room.id);
               for (const { id } of retired) {
                 moveHistory.run(room.id, 'udn2', floor, id);
                 deleteRoom.run('udn2', floor, id);

@@ -31,7 +31,7 @@ function validRoom(room) {
   if (!object(room) || !integer(room.id) || room.id < 1 || typeof room.label !== 'string' || !finite(room.cx) || !finite(room.cy)) return false;
   if (room.number !== undefined && room.number !== null && typeof room.number !== 'string') return false;
   if (['labelRu', 'labelKk'].some(key => room[key] !== undefined && typeof room[key] !== 'string')) return false;
-  if (room.partial !== undefined && typeof room.partial !== 'boolean') return false;
+  if (['partial', 'hideNumber'].some(key => room[key] !== undefined && typeof room[key] !== 'boolean')) return false;
   if (room.polygons !== undefined) {
     return Array.isArray(room.polygons) && room.polygons.length > 0 && room.polygons.every(points => typeof points === 'string' && points.trim().length > 0);
   }

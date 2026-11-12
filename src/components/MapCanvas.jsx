@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { buildingFloorName } from '../i18n.js';
+import { buildingFloorName, hidesRoomNumber } from '../i18n.js';
 
 const clampZoom = value => Math.max(.5, Math.min(5, value));
 function RoomShape({ room, ...props }) {
@@ -132,8 +132,9 @@ const MapCanvas = forwardRef(function MapCanvas({ floorData, building, floor, se
           const udn2Toilet = building === 'udn2' && room.type === 'wc';
           const outline = udn2Toilet && room.polygons ? sanitaryOutline(room) : room;
           const narrow = room.type === 'terrace' || (outline.w && outline.w < 55);
-          const number = room.type === 'wc' ? undefined : room.number;
-          const planId = building === 'udn2' && !udn2Toilet && !number;
+          const numberHidden = hidesRoomNumber(room);
+          const number = numberHidden ? undefined : room.number;
+          const planId = building === 'udn2' && !numberHidden && !number;
           const title = number || (planId ? t('planIdShort', { n: room.id }) : room.label === 'Помещение' ? t('roomShort') : room.label === 'Подсобное помещение' ? t('utilityShort') : roomLabel(room));
           const accessibleName = planId ? `${displayName(room)} · ${t('planId', { n: room.id })}` : displayName(room);
           const baseSize = number ? (floorData.wide ? 19 : 17) : narrow ? 10 : title.length > 14 ? 10 : floorData.wide ? 13 : 12;
