@@ -1,3 +1,5 @@
+import { isBuildingId } from '../api-client.js';
+
 const ROOT = '/api/v1/admin';
 
 export class AdminError extends Error {
@@ -37,7 +39,7 @@ async function request(path, { method = 'GET', body, csrfToken, signal } = {}) {
 
 const validate = (response, predicate) => { if(!predicate(response.data))throw new AdminError('INVALID_RESPONSE');return response; };
 const sessionValid = data => data&&typeof data.configured==='boolean'&&typeof data.authenticated==='boolean'&&typeof data.canSetup==='boolean'&&(!data.authenticated||typeof data.csrfToken==='string'&&data.csrfToken.length>20);
-const roomValid = room => room&&['five','seven'].includes(room.building)&&Number.isInteger(room.floor)&&Number.isInteger(room.id)&&room.id>0&&typeof room.label==='string'&&typeof room.labelRu==='string'&&typeof room.labelKk==='string'&&(room.number===undefined||typeof room.number==='string');
+const roomValid = room => room&&isBuildingId(room.building)&&Number.isInteger(room.floor)&&Number.isInteger(room.id)&&room.id>0&&typeof room.label==='string'&&typeof room.labelRu==='string'&&typeof room.labelKk==='string'&&(room.number===undefined||typeof room.number==='string');
 export const getSession = options => request('/session', options).then(response=>validate(response,sessionValid));
 export const authenticate = (password, setup = false, options = {}) => request(setup ? '/setup' : '/login', { ...options, method: 'POST', body: { password } }).then(response=>validate(response,sessionValid));
 export const logout = (csrfToken, options = {}) => request('/logout', { ...options, method: 'POST', body: {}, csrfToken });

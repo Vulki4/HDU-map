@@ -3,11 +3,12 @@ import { buildCatalog, findRoute, searchRooms } from '../src/map-core.js';
 
 const PREFIX = '/api/v1';
 const BODY_LIMIT = 8 * 1024;
-const ROOM_FIELDS = ['id','number','label','labelRu','labelKk','type','x','y','w','h','cx','cy','points','start','door','partial'];
+const ROOM_FIELDS = ['id','number','label','labelRu','labelKk','type','x','y','w','h','cx','cy','points','polygons','start','door','partial'];
 const FLOOR_FIELDS = ['view','spineX','spineY','wide','partialAnnex'];
 const BUILDING_NAMES = {
   five: { code:'A', name:{ru:'А корпус',kk:'А корпусы'} },
   seven: { code:'B', name:{ru:'Б корпус',kk:'Б корпусы'} },
+  udn2: { code:'UDN2', name:{ru:'УДН 2',kk:'УДН 2'} },
 };
 
 class ApiError extends Error {
@@ -24,7 +25,7 @@ const publicPoint = point => ({...publicRoom(point),building:point.building,floo
 /** Only student-facing map data is serialized; plan provenance and areas stay private. */
 export function sanitizeMaps(maps) {
   return Object.fromEntries(Object.entries(maps).map(([id,map])=>[id,{
-    ...copyFields(map,['name','short']),
+    ...copyFields(map,['name','short','routingAvailable']),
     floors:Object.fromEntries(Object.entries(map.floors).map(([floor,data])=>[floor,publicFloor(data)])),
   }]));
 }
@@ -154,6 +155,7 @@ export function createApiHandler({repository,logger}={}) {
         let catalog=buildCatalog(maps);
         if(building!==undefined)catalog=catalog.filter(room=>room.building===building);
         if(floor!==undefined)catalog=catalog.filter(room=>room.floor===floor);
+        if(routeOnly==='true')catalog=catalog.filter(room=>maps[room.building].routingAvailable!==false);
         const data=searchRooms(q,{catalog,building:contextBuilding??building,floor:contextFloor??floor},routeOnly==='true').slice(0,limit).map(publicPoint);
         sendJSON(req,res,200,{data,revision});
       } else {
@@ -162,9 +164,9 @@ export function createApiHandler({repository,logger}={}) {
         if(!objectLike(body))throw new ApiError(400,'VALIDATION_ERROR','Request body must contain from and to endpoints.');
         const from=canonicalPoint(body.from,maps), to=canonicalPoint(body.to,maps);
         if(from.building!==to.building)throw new ApiError(422,'CROSS_BUILDING','A verified route between corpora is unavailable.');
-        if(from.partial||to.partial)throw new ApiError(422,'PARTIAL_PLAN','An endpoint belongs to an incomplete plan.');
-        if(from.floor===to.floor&&from.id===to.id)throw new ApiError(422,'SAME_POINT','The start and destination must differ.');
         const route=findRoute(maps,from.building,from.floor,from.id,to.floor,to.id);
+        if(route.errorKey==='partial')throw new ApiError(422,'PARTIAL_PLAN','An endpoint belongs to an incomplete plan.');
+        if(route.errorKey==='samePoint')throw new ApiError(422,'SAME_POINT','The start and destination must differ.');
         if(!route.ok)throw new ApiError(422,'NO_ROUTE','No continuous route was found between these endpoints.');
         sendJSON(req,res,200,{data:route,revision});
       }

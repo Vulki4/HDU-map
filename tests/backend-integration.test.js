@@ -34,7 +34,7 @@ test('real Node HTTP bootstrap reads the SQLite catalog and publishes only stude
     const maps = payload.data;
     assert.deepEqual(Object.keys(maps.five.floors).map(Number), [0, 1, 2, 3, 4, 5]);
     assert.deepEqual(Object.keys(maps.seven.floors).map(Number), [1, 2, 3, 4, 5, 6, 7]);
-    assert.equal(Object.values(maps).flatMap(map => Object.values(map.floors).flatMap(floor => floor.rooms)).length, 170);
+    assert.equal([maps.five, maps.seven].flatMap(map => Object.values(map.floors).flatMap(floor => floor.rooms)).length, 170);
     assert.equal(maps.five.floors[0].rooms.find(room => room.id === 2).number, '01А');
     assertStudentData(payload);
     const etag = response.headers.get('etag'); assert.ok(etag);

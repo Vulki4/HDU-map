@@ -40,8 +40,7 @@ test('translator preserves leading zeroes, suffixes and numeric zero without mut
 });
 
 test('all actual room types have Kazakh labels and search accepts either language', () => {
-  const labels = new Set(catalog.map(room => room.label));
-  for (const label of labels) assert.ok(ROOM_KK[label]?.trim(), label);
+  for (const room of catalog) assert.ok((room.labelKk || ROOM_KK[room.label])?.trim(), room.label);
   const search = query => searchRooms(query, { catalog, building: 'five', floor: 0 }).map(keyOf);
   for (const [russian, kazakh] of [['библиотека', 'кітапхана'], ['лестница', 'баспалдақ'], ['столовая', 'асхана']]) {
     assert.deepEqual(search(russian), search(kazakh), `${russian}/${kazakh}`);

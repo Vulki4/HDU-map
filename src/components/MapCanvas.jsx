@@ -1,9 +1,22 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { buildingFloorName } from '../i18n.js';
 
 const clampZoom = value => Math.max(.5, Math.min(5, value));
 function RoomShape({ room, ...props }) {
+  if (room.polygons) return room.polygons.map((points, index) => <polygon key={index} points={points} {...props} />);
   return room.points ? <polygon points={room.points} {...props} /> : <rect x={room.x} y={room.y} width={room.w} height={room.h} rx="2" {...props} />;
 }
+
+// The washrooms and stalls on each UDN 2 floor occupy one rectangular block.
+function sanitaryOutline({ polygons, ...room }) {
+  const vertices = polygons.join(' ').trim().split(/\s+/).map(point => point.split(',').map(Number));
+  const xs = vertices.map(([x]) => x);
+  const ys = vertices.map(([, y]) => y);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+  return { ...room, x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
+}
+
 function ServiceIcon({ room, wide }) {
   const size = Math.max(12, Math.min(wide ? 24 : 22, room.w ? room.w - 6 : 22, room.h ? room.h - 6 : 22));
   return <svg className="room-map-icon" x={room.cx - size / 2} y={room.cy - size / 2} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" style={{ color: 'var(--label)' }}>
@@ -102,8 +115,9 @@ const MapCanvas = forwardRef(function MapCanvas({ floorData, building, floor, se
     if (window.matchMedia && !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
     setHoveredId(id);
   };
+  const displayName = room => roomName({ ...room, building });
   const bubble = room => {
-    const full = roomName(room), title = full.length > 29 ? `${full.slice(0, 28)}…` : full;
+    const full = displayName(room), title = full.length > 29 ? `${full.slice(0, 28)}…` : full;
     const width = Math.max(84, Math.min(245, title.length * 7.3 + 24)), height = 32;
     const [vx, vy, vw] = floorData.view;
     const cx = Math.max(vx + width / 2 + 4, Math.min(vx + vw - width / 2 - 4, room.cx));
@@ -112,22 +126,30 @@ const MapCanvas = forwardRef(function MapCanvas({ floorData, building, floor, se
   };
   return <div className="canvas" id="canvas" ref={canvasRef}>
     <div className="grid" aria-hidden="true" />
-    <div id="drawing" className={floorData.wide ? 'wide-map' : ''} ref={drawingRef}>
-      <svg viewBox={floorData.view.join(' ')} role="group" aria-label={`${t('mapAria')}, ${t(building)}, ${floor === 0 ? t('basement') : t('floor', { n: floor })}`}>
+    <div id="drawing" className={floorData.wide ? 'wide-map' : ''} style={building === 'udn2' ? { '--floor-aspect': floorData.view[2] / floorData.view[3] } : undefined} ref={drawingRef}>
+      <svg viewBox={floorData.view.join(' ')} role="group" aria-label={`${t('mapAria')}, ${t(building)}, ${buildingFloorName(t, building, floor)}`}>
         {rooms.map(room => {
-          const narrow = room.type === 'terrace' || (room.w && room.w < 55);
-          const title = room.number || (room.label === 'Помещение' ? t('roomShort') : room.label === 'Подсобное помещение' ? t('utilityShort') : roomLabel(room));
-          const baseSize = room.number ? (floorData.wide ? 19 : 17) : narrow ? 10 : title.length > 14 ? 10 : floorData.wide ? 13 : 12;
-          const size = room.w ? Math.max(6, Math.min(baseSize, room.w * 1.55 / title.length)) : baseSize;
-          const service = !room.number && (room.type === 'stair' || room.type === 'wc');
-          return <g key={room.id} className={`map-room${hoveredId === room.id ? ' is-hovered' : ''}${selectedId === room.id ? ' is-selected' : ''}`} data-room={room.id} data-type={room.type || 'room'} role="button" tabIndex="0" aria-label={roomName(room)} aria-pressed={selectedId === room.id}
+          const udn2Toilet = building === 'udn2' && room.type === 'wc';
+          const outline = udn2Toilet && room.polygons ? sanitaryOutline(room) : room;
+          const narrow = room.type === 'terrace' || (outline.w && outline.w < 55);
+          const number = room.type === 'wc' ? undefined : room.number;
+          const planId = building === 'udn2' && !udn2Toilet && !number;
+          const title = number || (planId ? t('planIdShort', { n: room.id }) : room.label === 'Помещение' ? t('roomShort') : room.label === 'Подсобное помещение' ? t('utilityShort') : roomLabel(room));
+          const accessibleName = planId ? `${displayName(room)} · ${t('planId', { n: room.id })}` : displayName(room);
+          const baseSize = number ? (floorData.wide ? 19 : 17) : narrow ? 10 : title.length > 14 ? 10 : floorData.wide ? 13 : 12;
+          const size = outline.w ? Math.max(6, Math.min(baseSize, outline.w * 1.55 / title.length)) : baseSize;
+          const service = !number && (room.type === 'stair' || room.type === 'wc');
+          return <g key={room.id} className={`map-room${hoveredId === room.id ? ' is-hovered' : ''}${selectedId === room.id ? ' is-selected' : ''}`} data-room={room.id} data-type={room.type || 'room'} role="button" tabIndex="0" aria-label={accessibleName} aria-pressed={selectedId === room.id}
             onPointerEnter={event => hover(event, room.id)} onPointerLeave={() => setHoveredId(current => current === room.id ? null : current)} onFocus={() => setFocusedId(room.id)} onBlur={() => setFocusedId(current => current === room.id ? null : current)}
             onClick={() => { if (!suppressClick.current) onSelect?.(room.id, { keyboard: false }); }}
             onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect?.(room.id, { keyboard: true }); event.currentTarget.focus({ preventScroll: true }); } }}>
-            <title>{roomName(room)}</title>
-            <g className="room-visual" pointerEvents="none"><RoomShape room={room} className={`room ${room.type || ''}${selectedId === room.id ? ' selected' : ''}${room.partial ? ' partial' : ''}`} />{service ? <ServiceIcon room={room} wide={floorData.wide} /> : <text className="room-label" style={{ fontSize: `${size}px` }} x={room.cx} y={room.cy + 4}>{title}</text>}</g>
-            <RoomShape room={room} className="room-hitbox" fill="transparent" stroke="none" />
-            {activeId === room.id && bubble(room)}
+            <title>{accessibleName}</title>
+            <g className="room-visual" pointerEvents="none">
+              <RoomShape room={outline} className={`room ${room.type || ''}${selectedId === room.id ? ' selected' : ''}${room.partial ? ' partial' : ''}`} />
+              {service ? <ServiceIcon room={outline} wide={floorData.wide} /> : <text className="room-label" style={{ fontSize: `${size}px` }} x={outline.cx} y={outline.cy + 4}>{title}</text>}
+            </g>
+            <RoomShape room={outline} className="room-hitbox" fill="transparent" stroke="none" />
+            {activeId === room.id && bubble(outline)}
           </g>;
         })}
         {floorData.rooms.filter(room => room.door && !room.partial).map(room => <circle key={`door-${room.id}`} cx={room.door[0]} cy={room.door[1]} r="3.3" fill="var(--door)" stroke="var(--hall)" strokeWidth="1" pointerEvents="none" />)}

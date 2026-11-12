@@ -46,8 +46,8 @@ test('schema 1 migrates atomically to schema 2 without changing rooms, revision 
   try {
     assert.equal(check.prepare("SELECT value FROM metadata WHERE key='schema_version'").get().value, '2');
     assert.equal(check.prepare("SELECT value FROM metadata WHERE key='seeded_at'").get().value, seededAt);
-    assert.equal(check.prepare('SELECT count(*) AS total FROM rooms').get().total, 170);
-    assert.equal(check.prepare('SELECT count(*) AS total FROM floors').get().total, 13);
+    assert.equal(check.prepare("SELECT count(*) AS total FROM rooms WHERE building_id IN ('five','seven')").get().total, 170);
+    assert.equal(check.prepare("SELECT count(*) AS total FROM floors WHERE building_id IN ('five','seven')").get().total, 13);
   } finally { check.close(); }
 });
 
@@ -62,7 +62,7 @@ test('a failed migration leaves version 1 and its existing catalog untouched', t
     assert.equal(check.prepare("SELECT value FROM metadata WHERE key='schema_version'").get().value, '1');
     assert.equal(check.prepare("SELECT value FROM metadata WHERE key='dataset_revision'").get().value, revision);
     assert.equal(check.prepare("SELECT count(*) AS total FROM sqlite_master WHERE name='admin_credentials'").get().total, 0);
-    assert.equal(check.prepare('SELECT count(*) AS total FROM rooms').get().total, 170);
+    assert.equal(check.prepare("SELECT count(*) AS total FROM rooms WHERE building_id IN ('five','seven')").get().total, 170);
   } finally { check.close(); }
 });
 
@@ -83,6 +83,171 @@ test('admin setup stores a hash exactly once and keeps it out of maps and revisi
     assert.doesNotMatch(JSON.stringify(second.getMaps()), /scrypt|password_hash|first-salted-hash/);
     for (const invalid of [null, 123, '', 'a'.repeat(513)]) assert.throws(() => second.setAdminCredential(invalid), code('VALIDATION_ERROR'));
   } finally { second.close(); }
+});
+
+test('adding UDN 2 to an existing database preserves edits, history and administrator credentials', t => {
+  const filename = temporaryDatabase(t);
+  const seed = { seven: MAPS.seven, five: MAPS.five };
+  let repository = createMapRepository({ filename, seed });
+  let before, history, oldRevision;
+  try {
+    repository.setAdminCredential('existing-administrator-hash');
+    repository.updateRoom(editable(repository, { labelRu: 'Обновлённое название' }));
+    before = repository.getMaps();
+    history = repository.getRoomHistory(point);
+    oldRevision = repository.getRevision();
+  } finally { repository.close(); }
+
+  const udn2 = { name: 'УДН 2', floors: { 1: { view: [0, 0, 300, 300], rooms: [{ id: 1, number: '101', label: 'Комната' }] } } };
+  const invalid = structuredClone(udn2);
+  invalid.floors[1].rooms.push({ ...invalid.floors[1].rooms[0] });
+  assert.throws(() => createMapRepository({ filename, seed: { ...seed, udn2: invalid } }), /UNIQUE/);
+  repository = createMapRepository({ filename, seed });
+  try {
+    assert.deepEqual(repository.getMaps(), before);
+    assert.equal(repository.getRevision(), oldRevision);
+  } finally { repository.close(); }
+
+  const newSeed = { ...seed, five: { ...seed.five, name: 'Changed seed' }, udn2 };
+  repository = createMapRepository({ filename, seed: newSeed });
+  let newRevision;
+  try {
+    const catalog = repository.getMaps();
+    assert.deepEqual(catalog, { ...before, udn2 });
+    assert.deepEqual(repository.getRoomHistory(point), history);
+    assert.deepEqual(repository.getAdminCredential(), { passwordHash: 'existing-administrator-hash' });
+    newRevision = repository.getRevision();
+    assert.notEqual(newRevision, oldRevision);
+    assert.equal(newRevision, createHash('sha256').update(JSON.stringify(catalog)).digest('hex'));
+  } finally { repository.close(); }
+
+  repository = createMapRepository({ filename, seed: newSeed });
+  try {
+    assert.deepEqual(repository.getMaps(), { ...before, udn2 });
+    assert.equal(repository.getRevision(), newRevision);
+  } finally { repository.close(); }
+});
+
+test('merging UDN 2 corridor sections preserves the primary edit and all history', t => {
+  const filename = temporaryDatabase(t);
+  const primary = { id: 1, type: 'corridor', label: 'Коридор', points: '0,0 5,0 5,5 0,5' };
+  const section = { id: 2, type: 'corridor', label: 'Коридор', points: '5,0 10,0 10,5 5,5' };
+  const ordinary = { id: 2, type: 'room', label: 'Комната' };
+  const oldSeed = { udn2: { floors: { 1: { rooms: [primary, section] }, 2: { rooms: [primary, ordinary] } } } };
+  const merged = { id: 1, type: 'corridor', label: 'Коридор', polygons: [primary.points, section.points], mergedRoomIds: [2] };
+  const seed = { udn2: { floors: { 1: { rooms: [merged] }, 2: oldSeed.udn2.floors[2] } } };
+  const mainPoint = { building: 'udn2', floor: 1, id: primary.id };
+  const sectionPoint = { ...mainPoint, id: section.id };
+  let repository = createMapRepository({ filename, seed: oldSeed });
+  let revision, previousMaps, history;
+  try {
+    repository.updateRoom(editable(repository, { labelRu: 'Главный коридор', labelKk: 'Бас дәліз', number: '09А' }, mainPoint));
+    repository.updateRoom(editable(repository, { labelRu: 'Западный коридор', number: '09Б' }, sectionPoint));
+    revision = repository.getRevision();
+    previousMaps = repository.getMaps();
+    history = [...repository.getRoomHistory(sectionPoint), ...repository.getRoomHistory(mainPoint)];
+  } finally { repository.close(); }
+
+  const invalidSeed = { udn2: { floors: { 1: seed.udn2.floors[1], 2: { rooms: [merged] } } } };
+  assert.throws(() => createMapRepository({ filename, seed: invalidSeed }), /did not match the stored plan/);
+  repository = createMapRepository({ filename, seed: oldSeed });
+  try {
+    assert.deepEqual(repository.getMaps(), previousMaps);
+    assert.equal(repository.getRevision(), revision);
+    assert.deepEqual(repository.getRoomHistory(mainPoint), [history[1]]);
+    assert.deepEqual(repository.getRoomHistory(sectionPoint), [history[0]]);
+  } finally { repository.close(); }
+
+  repository = createMapRepository({ filename, seed });
+  let mergedRevision;
+  try {
+    const maps = repository.getMaps();
+    assert.deepEqual(maps.udn2.floors[1].rooms, [
+      { ...merged, label: 'Главный коридор', labelRu: 'Главный коридор', labelKk: 'Бас дәліз', number: '09А' },
+    ]);
+    assert.deepEqual(maps.udn2.floors[2], previousMaps.udn2.floors[2]);
+    assert.deepEqual(repository.getRoomHistory(mainPoint), history);
+    assert.throws(() => repository.getRoomHistory(sectionPoint), code('NOT_FOUND'));
+    mergedRevision = repository.getRevision();
+    assert.notEqual(mergedRevision, revision);
+    assert.equal(mergedRevision, createHash('sha256').update(JSON.stringify(maps)).digest('hex'));
+  } finally { repository.close(); }
+
+  repository = createMapRepository({ filename, seed });
+  try {
+    assert.equal(repository.getRevision(), mergedRevision);
+    assert.deepEqual(repository.getRoomHistory(mainPoint), history);
+  } finally { repository.close(); }
+
+  const outlined = { ...merged, polygons: ['0,0 10,0 10,5 0,5'] };
+  const outlinedSeed = { udn2: { floors: { ...seed.udn2.floors, 1: { rooms: [outlined] } } } };
+  repository = createMapRepository({ filename, seed: outlinedSeed });
+  let outlineRevision;
+  try {
+    assert.deepEqual(currentRoom(repository, mainPoint), { ...outlined, label: 'Главный коридор', labelRu: 'Главный коридор', labelKk: 'Бас дәліз', number: '09А' });
+    assert.deepEqual(repository.getRoomHistory(mainPoint), history);
+    outlineRevision = repository.getRevision();
+    assert.notEqual(outlineRevision, mergedRevision);
+  } finally { repository.close(); }
+
+  repository = createMapRepository({ filename, seed: outlinedSeed });
+  try { assert.equal(repository.getRevision(), outlineRevision); } finally { repository.close(); }
+
+  const fresh = createMapRepository({ filename: ':memory:', seed: outlinedSeed });
+  try { assert.deepEqual(fresh.getMaps(), outlinedSeed); } finally { fresh.close(); }
+});
+
+test('sanitary merges apply new defaults while preserving explicit administrator edits', t => {
+  const filename = temporaryDatabase(t);
+  const washroom = { id: 1, type: 'wc', label: 'Умывальная', labelKk: 'Жуынатын бөлме' };
+  const toilet = { id: 2, type: 'wc', label: 'Туалет', labelKk: 'Әжетхана' };
+  const sanitary = { id: 1, type: 'wc', label: 'Санузел', labelKk: 'Әжетхана', polygons: ['0,0 5,0 5,5', '5,0 10,0 10,5'], mergedRoomIds: [2] };
+  const seedWith = rooms => ({ udn2: { floors: { 1: { rooms }, 2: { rooms }, 3: { rooms } } } });
+  const at = (floor, id = 1) => ({ building: 'udn2', floor, id });
+  const old = createMapRepository({ filename, seed: seedWith([washroom, toilet]) });
+  let retiredHistory;
+  try {
+    old.updateRoom(editable(old, { labelRu: 'Старое название', labelKk: 'Ескі атау' }, at(1, 2)));
+    retiredHistory = old.getRoomHistory(at(1, 2));
+    old.updateRoom(editable(old, { number: '07' }, at(2)));
+    old.updateRoom(editable(old, { labelRu: 'Санузел А', labelKk: 'Әжетхана А', number: '09А' }, at(3)));
+  } finally { old.close(); }
+
+  const seed = seedWith([sanitary]);
+  const migrated = createMapRepository({ filename, seed });
+  let revision;
+  try {
+    assert.deepEqual(currentRoom(migrated, at(1)), sanitary);
+    assert.deepEqual(migrated.getRoomHistory(at(1)), retiredHistory);
+    assert.deepEqual(currentRoom(migrated, at(2)), { ...sanitary, number: '07' });
+    assert.deepEqual(currentRoom(migrated, at(3)), { ...sanitary, label: 'Санузел А', labelRu: 'Санузел А', labelKk: 'Әжетхана А', number: '09А' });
+    for (const floor of [1, 2, 3]) assert.equal(migrated.getMaps().udn2.floors[floor].rooms.length, 1);
+    revision = migrated.getRevision();
+  } finally { migrated.close(); }
+
+  const reopened = createMapRepository({ filename, seed });
+  try {
+    assert.equal(reopened.getRevision(), revision);
+    assert.deepEqual(reopened.getRoomHistory(at(1)), retiredHistory);
+    reopened.updateRoom(editable(reopened, { number: '08' }, at(2)));
+    reopened.updateRoom(editable(reopened, { labelRu: 'Санузел' }, at(3)));
+  } finally { reopened.close(); }
+
+  const renamed = { ...sanitary, label: 'Туалет' };
+  const renamedSeed = seedWith([renamed]);
+  const updated = createMapRepository({ filename, seed: renamedSeed });
+  try {
+    assert.deepEqual(currentRoom(updated, at(1)), renamed);
+    assert.deepEqual(currentRoom(updated, at(2)), { ...renamed, labelRu: 'Туалет', number: '08' });
+    assert.deepEqual(currentRoom(updated, at(3)), { ...sanitary, labelRu: 'Санузел', labelKk: 'Әжетхана А', number: '09А' });
+    assert.deepEqual(updated.getRoomHistory(at(1)), retiredHistory);
+    assert.equal(updated.getRoomHistory(at(2)).length, 2);
+    assert.equal(updated.getRoomHistory(at(3)).length, 2);
+    revision = updated.getRevision();
+  } finally { updated.close(); }
+
+  const unchanged = createMapRepository({ filename, seed: renamedSeed });
+  try { assert.equal(unchanged.getRevision(), revision); } finally { unchanged.close(); }
 });
 
 test('editing stores bilingual names and text cabinet numbers, preserves geometry, and persists across restart', t => {

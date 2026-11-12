@@ -7,9 +7,10 @@ const catalog = buildCatalog(maps);
 const search = (query, routeOnly = false, building = 'five', floor = 0) => searchRooms(query, { catalog, building, floor }, routeOnly);
 
 test('13 floors and all 170 unchanged rooms are catalogued with stable keys', () => {
-  assert.equal(catalog.length, 170);
-  assert.equal(new Set(catalog.map(keyOf)).size, 170);
-  assert.equal(Object.values(maps).flatMap(map => Object.keys(map.floors)).length, 13);
+  const original = buildCatalog({ five: maps.five, seven: maps.seven });
+  assert.equal(original.length, 170);
+  assert.equal(new Set(catalog.map(keyOf)).size, catalog.length);
+  assert.equal([maps.five, maps.seven].flatMap(map => Object.keys(map.floors)).length, 13);
   assert.deepEqual(Object.keys(maps.five.floors).map(Number), [0, 1, 2, 3, 4, 5]);
   assert.deepEqual(Object.keys(maps.seven.floors).map(Number), [1, 2, 3, 4, 5, 6, 7]);
   for (const room of catalog) assert.equal(room.number, maps[room.building].floors[room.floor].rooms.find(original => original.id === room.id).number);
@@ -57,6 +58,7 @@ test('local context keeps the original search ranking', () => {
 test('121 existing staircase-to-room route connections retain their geometry', () => {
   const before = JSON.stringify(maps); let checks = 0;
   for (const [building, map] of Object.entries(maps)) {
+    if (map.routingAvailable === false) continue;
     for (const [floor, data] of Object.entries(map.floors)) {
       const target = data.rooms.find(room => room.type !== 'stair' && !room.partial);
       for (const [startFloor, startData] of Object.entries(map.floors)) {

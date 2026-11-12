@@ -213,7 +213,7 @@ main { position: absolute; inset: 0; }
 .map-heading h1 { margin: 7px 0 0; font-size: 34px; font-weight: 600; line-height: 1.2; letter-spacing: -1.2px; }
 .map-context-help { max-width: 185px; margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.9; }
 #drawing { position: relative; width: min(calc(100vw - 250px), calc((100dvh - var(--canvas-top) - var(--safe-top-extra) - var(--canvas-bottom)) * 1.02)); min-width: 180px; transform-origin: center; touch-action: none; cursor: grab; }
-#drawing.wide-map { width: min(calc(100vw - 180px), 1400px, calc((100dvh - var(--canvas-top) - var(--safe-top-extra) - var(--canvas-bottom)) * 2.55)); min-width: 0; margin-right: 30px; }
+#drawing.wide-map { width: min(calc(100vw - 180px), 1400px, calc((100dvh - var(--canvas-top) - var(--safe-top-extra) - var(--canvas-bottom)) * var(--floor-aspect, 2.55))); min-width: 0; margin-right: 30px; }
 #drawing > svg { width: 100%; height: auto; overflow: visible; }
 .room { fill: var(--room); stroke: var(--roomStroke); stroke-width: 1.35; cursor: pointer; transition: fill .16s ease, stroke .16s ease; }
 .room.corridor { fill: var(--hall); }
@@ -308,7 +308,7 @@ dialog p { color: var(--muted); font-size: 12px; line-height: 1.95; }
   .map-heading h1 { font-size: 28px; }
   .map-context-help { display: none; }
   #drawing { width: min(calc(100vw - 155px), calc((100dvh - var(--canvas-top) - var(--safe-top-extra) - var(--canvas-bottom)) * 1.02)); }
-  #drawing.wide-map { width: min(calc(100vw - 125px), calc((100dvh - var(--canvas-top) - var(--safe-top-extra) - var(--canvas-bottom)) * 2.55)); margin-right: 20px; }
+  #drawing.wide-map { width: min(calc(100vw - 125px), calc((100dvh - var(--canvas-top) - var(--safe-top-extra) - var(--canvas-bottom)) * var(--floor-aspect, 2.55))); margin-right: 20px; }
   .room-card { right: 88px; width: 310px; padding: 22px; }
 }
 @media (max-width: 760px) {
@@ -331,8 +331,8 @@ dialog p { color: var(--muted); font-size: 12px; line-height: 1.95; }
   .header-actions { gap: 6px; }
   .language-switch button { padding: 0 6px; font-size: 10px; }
   .map-toolbar { gap: 8px; }
-  #buildings { gap: 3px; border-radius: 18px; }
-  .corpus-button { min-width: 118px; height: 44px; padding: 0 14px; gap: 8px; border-radius: 13px; }
+  #buildings { max-width: 100%; gap: 3px; border-radius: 18px; }
+  .corpus-button { min-width: 0; height: 44px; padding: 0 clamp(7px, 2.35vw, 14px); gap: 6px; border-radius: 13px; }
   .corpus-button b { font-size: 12px; }
   .corpus-icon, .corpus-icon svg { width: 20px; height: 20px; }
   .toolbar-divider { display: none; }
@@ -349,7 +349,7 @@ dialog p { color: var(--muted); font-size: 12px; line-height: 1.95; }
   .map-heading .eyebrow { font-size: 7px; }
   .canvas { padding-right: calc(64px + env(safe-area-inset-right)); }
   #drawing { width: min(calc(100vw - 80px), calc((100dvh - var(--canvas-top) - var(--safe-top-extra) - var(--canvas-bottom)) * 1.02)); min-width: 145px; }
-  #drawing.wide-map { width: min(calc(100vw - 82px), calc((100dvh - var(--canvas-top) - var(--safe-top-extra) - var(--canvas-bottom)) * 2.55)); margin-right: 16px; }
+  #drawing.wide-map { width: min(calc(100vw - 82px), calc((100dvh - var(--canvas-top) - var(--safe-top-extra) - var(--canvas-bottom)) * var(--floor-aspect, 2.55))); margin-right: 16px; }
   .floor-rail { right: max(12px, env(safe-area-inset-right)); gap: 6px; }
   .floor-caption { font-size: 8px; }
   #floors { padding: 4px; gap: 2px; border-radius: 18px; max-height: max(94px, calc(100dvh - 330px)); }

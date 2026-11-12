@@ -32,7 +32,8 @@ test('React MapCanvas handles hover, selection, viewport gestures and cleanup (2
     const transformed = await transformWithOxc(source, 'MapCanvas.jsx', { jsx: { runtime: 'automatic' } });
     const compiled = transformed.code
       .replace(/from (["'])react\1/g, `from ${JSON.stringify(pathToFileURL(require.resolve('react')).href)}`)
-      .replace(/from (["'])react\/jsx-runtime\1/g, `from ${JSON.stringify(pathToFileURL(require.resolve('react/jsx-runtime')).href)}`);
+      .replace(/from (["'])react\/jsx-runtime\1/g, `from ${JSON.stringify(pathToFileURL(require.resolve('react/jsx-runtime')).href)}`)
+      .replace(/from (["'])\.\.\/i18n\.js\1/g, `from ${JSON.stringify(new URL('src/i18n.js', project).href)}`);
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hdu-mapcanvas-test-'));
     modulePath = path.join(tempDir, 'MapCanvas.mjs');
     fs.writeFileSync(modulePath, compiled);

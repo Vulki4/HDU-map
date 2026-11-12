@@ -180,6 +180,38 @@ test('React application supports student search and route workflows', async t =>
       assert.equal(app.$('.map-heading h1').textContent,'1 этаж');
     }));
 
+    await t.test('UDN 2 deep links and floor switches show plans without offering unverified routes',()=>withApp('?building=udn2&floor=4&lang=ru',async app=>{
+      assert.equal(app.$('#buildings button:last-child').getAttribute('aria-pressed'),'true');
+      assert.equal(app.$('.map-heading h1').textContent,'Мансарда');
+      assert.equal(app.document.querySelectorAll('#floors button').length,5);
+      await app.click('#floors button[aria-label="Цокольный этаж"]');
+      assert.equal(app.$('.map-heading h1').textContent,'Цокольный этаж');
+      assert.match(app.location.search,/building=udn2&floor=0/);
+      const corridors=app.document.querySelectorAll('.map-room[data-type="corridor"]');
+      assert.equal(corridors.length,1);
+      assert.equal(corridors[0].querySelectorAll('.room-label').length,1);
+      const parts=corridors[0].querySelectorAll('.room-hitbox');
+      assert.equal(parts.length,1);
+      await app.click(parts[0]);
+      assert.match(app.$('#detail').textContent,/Коридор.*по плану № 13/s);
+      const sanitaryZones=app.document.querySelectorAll('.map-room[data-type="wc"]');
+      assert.equal(sanitaryZones.length,1);
+      assert.ok(sanitaryZones[0].querySelector('.room-map-icon'));
+      assert.equal(sanitaryZones[0].querySelector('.room-label'),null);
+      assert.equal(sanitaryZones[0].getAttribute('aria-label'),'Туалет');
+      assert.equal(sanitaryZones[0].querySelectorAll('.room-visual > .room').length,1);
+      assert.equal(sanitaryZones[0].querySelectorAll('.room-hitbox').length,1);
+      await app.click(sanitaryZones[0].querySelector('rect.room-hitbox'));
+      assert.equal(app.$('#detail h3').textContent,'Туалет');
+      assert.doesNotMatch(app.$('#detail').textContent,/№/);
+      await app.click('[data-room="4"]');
+      assert.match(app.$('#detail').textContent,/Столовая/);
+      assert.match(app.$('#detail').textContent,/по плану № 4/);
+      assert.equal(app.$('#chooseFrom'),null);
+      await app.click('.language-switch button[lang="kk"]');
+      assert.match(app.$('#detail').textContent,/Асхана/);
+    }));
+
     await t.test('zoom buttons call the real MapCanvas ref and reset to the fitted view',()=>withApp(undefined,async app=>{
       assert.equal(app.$('#zoomLabel').textContent,'100%');
       await app.click('#plus');

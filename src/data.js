@@ -1,4 +1,7 @@
 /* Геометрия вручную перенесена с архитектурных планов; координаты схемы условные. */
+import { udn2LowerFloors } from './udn2-lower.js';
+import { udn2UpperFloors } from './udn2-upper.js';
+
 const MAPS={seven:{name:'Здание 1 · 7 этажей',short:'Здание 1',source:'Здание 7 этажка.pdf',floors:{}},five:{name:'Здание 2 · отдельный корпус',short:'Здание 2',source:'5-ти этажное ПДФ.pdf',floors:{}}};
 function rect(id,x,y,w,h,label='Помещение',extra={}){return {id,x,y,w,h,label,cx:x+w/2,cy:y+h/2,...extra}}
 function poly(id,points,cx,cy,label,extra={}){return {id,points,cx,cy,label,...extra}}
@@ -64,5 +67,41 @@ MAPS.seven.floors[4].rooms.find(r=>r.id===7).number='319';
 // Номера экспликации не используются как номера кабинетов.
 const A_CABINET_NUMBERS={3:{5:'305',6:'307',7:'309',10:'316',11:'314',13:'312',14:'310',15:'308'},4:{2:'401',4:'403',5:'405',8:'407',10:'411',11:'410',13:'408',14:'406',15:'404',17:'402'},5:{2:'501',4:'503',8:'507',10:'509',11:'512',13:'510',14:'508',16:'504',18:'502'}};
 for(const [f,nums] of Object.entries(A_CABINET_NUMBERS))for(const r of MAPS.five.floors[f].rooms)if(nums[r.id])r.number=nums[r.id];
+
+const udn2Floors = { ...udn2LowerFloors, ...udn2UpperFloors };
+// Keep the primary ID. Corridors use the exterior outline of their joined parts.
+const udn2RoomGroups = [
+  [0, 13, '558,26 581,26 581,56 681,56 681,81 595,81 595,94 596,94 596,148 556,148 556,156 555,156 555,295 554,295 554,355 364,355 364,296 419,296 419,94 558,94'],
+  [2, 6, '131,193 185,193 185,156 368,156 368,193 531,193 531,20 617,20 617,193 762,193 762,20 965,20 965,349 528,349 528,529 452,529 452,349 131,349'],
+  [3, 6, '131,193 185,193 185,156 368,156 368,193 531,193 531,20 617,20 617,193 905,193 905,20 965,20 965,349 528,349 528,529 452,529 452,349 131,349'],
+  [4, 6, '117,189 183,189 183,154 368,154 368,189 530,189 530,20 613,20 613,189 892,189 892,20 958,20 958,345 523,345 523,525 450,525 450,345 117,345'],
+  [0, 16], [1, 8], [2, 18], [3, 18], [4, 17], // Toilets and washrooms
+];
+for (const [floor, mainId, outline] of udn2RoomGroups) {
+  const plan = udn2Floors[floor];
+  const main = plan.rooms.find(room => room.id === mainId);
+  const parts = plan.rooms.filter(room => room.type === main.type);
+  const { points, x, y, w, h, ...room } = main;
+  const merged = {
+    ...room,
+    ...(main.type === 'wc' ? { label: 'Туалет', labelKk: 'Әжетхана' } : {}),
+    polygons: outline ? [outline] : parts.map(part => {
+      if (part.points) return part.points;
+      const { x, y, w, h } = part;
+      return `${x},${y} ${x + w},${y} ${x + w},${y + h} ${x},${y + h}`;
+    }),
+    mergedRoomIds: parts.filter(part => part.id !== mainId).map(part => part.id),
+  };
+  const rooms = plan.rooms.filter(room => room.type !== main.type || room.id === mainId)
+    .map(room => room.id === mainId ? merged : room);
+  udn2Floors[floor] = { ...plan, rooms };
+}
+
+MAPS.udn2 = {
+  name: 'УДН 2',
+  short: 'УДН 2',
+  routingAvailable: false,
+  floors: udn2Floors,
+};
 
 export default MAPS;

@@ -1,6 +1,8 @@
 const API_ROOT = '/api/v1';
 const REQUEST_TIMEOUT = 8000;
-const BUILDINGS = new Set(['five', 'seven']);
+const REQUIRED_BUILDINGS = ['five', 'seven'];
+const BUILDINGS = new Set([...REQUIRED_BUILDINGS, 'udn2']);
+export const isBuildingId = value => BUILDINGS.has(value);
 const CODE_KEYS = {
   CROSS_BUILDING: 'crossBuilding', PARTIAL_PLAN: 'partial', SAME_POINT: 'samePoint',
   NO_ROUTE: 'noRoute', VALIDATION_ERROR: 'routeError', INVALID_QUERY: 'searchError',
@@ -30,13 +32,15 @@ function validRoom(room) {
   if (room.number !== undefined && room.number !== null && typeof room.number !== 'string') return false;
   if (['labelRu', 'labelKk'].some(key => room[key] !== undefined && typeof room[key] !== 'string')) return false;
   if (room.partial !== undefined && typeof room.partial !== 'boolean') return false;
+  if (room.polygons !== undefined) {
+    return Array.isArray(room.polygons) && room.polygons.length > 0 && room.polygons.every(points => typeof points === 'string' && points.trim().length > 0);
+  }
   if (room.points !== undefined) return typeof room.points === 'string' && room.points.length > 0;
   return ['x', 'y', 'w', 'h'].every(key => finite(room[key])) && room.w > 0 && room.h > 0;
 }
 function validMaps(maps) {
-  return object(maps) && [...BUILDINGS].every(building => {
-    const map = maps[building];
-    if (!object(map) || !object(map.floors) || !Object.keys(map.floors).length) return false;
+  return object(maps) && REQUIRED_BUILDINGS.every(id => Object.hasOwn(maps, id)) && Object.entries(maps).every(([id, map]) => {
+    if (!isBuildingId(id) || !object(map) || !object(map.floors) || !Object.keys(map.floors).length) return false;
     return Object.entries(map.floors).every(([key, floor]) => {
       if (!/^\d+$/.test(key) || !object(floor)) return false;
       if (!Array.isArray(floor.view) || floor.view.length !== 4 || !floor.view.every(finite) || floor.view[2] <= 0 || floor.view[3] <= 0) return false;
@@ -44,11 +48,19 @@ function validMaps(maps) {
     });
   });
 }
+function validBuildings(buildings) {
+  if (!Array.isArray(buildings) || !buildings.every(building => object(building) && isBuildingId(building.id) &&
+    object(building.name) && ['ru', 'kk'].every(lang => typeof building.name[lang] === 'string' && building.name[lang].length > 0) &&
+    Array.isArray(building.floors) && building.floors.length > 0 && building.floors.every(floor => integer(floor) && floor >= 0) &&
+    new Set(building.floors).size === building.floors.length)) return false;
+  const ids = new Set(buildings.map(building => building.id));
+  return ids.size === buildings.length && REQUIRED_BUILDINGS.every(id => ids.has(id));
+}
 function validSearch(points) {
-  return Array.isArray(points) && points.length <= 60 && points.every(point => validRoom(point) && BUILDINGS.has(point.building) && integer(point.floor));
+  return Array.isArray(points) && points.length <= 60 && points.every(point => validRoom(point) && isBuildingId(point.building) && integer(point.floor));
 }
 function validRoute(route) {
-  if (!object(route) || route.ok !== true || !BUILDINGS.has(route.building)) return false;
+  if (!object(route) || route.ok !== true || !isBuildingId(route.building)) return false;
   if (!['fromId', 'fromFloor', 'targetFloor', 'targetId'].every(key => integer(route[key]))) return false;
   return object(route.segments) && Object.keys(route.segments).length > 0 && Object.entries(route.segments).every(([floor, points]) => /^\d+$/.test(floor) && Array.isArray(points) && points.length > 0 && points.every(coordinate));
 }
@@ -101,18 +113,21 @@ async function request(path, { method = 'GET', body, signal, validate } = {}) {
 export function loadMaps({ signal } = {}) {
   return request('/maps', { signal, validate: validMaps });
 }
+export function loadBuildings({ signal } = {}) {
+  return request('/buildings', { signal, validate: validBuildings });
+}
 export function searchRoomsRemote(query, { building, floor, routeOnly = false, signal } = {}) {
-  if (typeof query !== 'string' || query.length > 120 || building !== undefined && !BUILDINGS.has(building) || floor !== undefined && !integer(floor) || typeof routeOnly !== 'boolean') {
+  if (typeof query !== 'string' || query.length > 120 || building !== undefined && !isBuildingId(building) || floor !== undefined && !integer(floor) || typeof routeOnly !== 'boolean') {
     return Promise.reject(new ApiError('Invalid search parameters.', { code: 'INVALID_QUERY', errorKey: 'searchError' }));
   }
   const params = new URLSearchParams({ q: query, routeOnly: String(routeOnly), limit: '60' });
-  // UI context changes ranking, never hides matches on other floors or in the other corpus.
+  // UI context changes ranking, never hides matches on other floors or in other buildings.
   if (building !== undefined) params.set('contextBuilding', building);
   if (floor !== undefined) params.set('contextFloor', String(floor));
   return request(`/search?${params}`, { signal, validate: validSearch });
 }
 function canonicalEndpoint(point) {
-  if (!object(point) || !BUILDINGS.has(point.building) || !integer(point.floor) || !integer(point.id) || point.id < 1) throw new ApiError('Invalid route endpoint.', { code: 'VALIDATION_ERROR', errorKey: 'routeError' });
+  if (!object(point) || !isBuildingId(point.building) || !integer(point.floor) || !integer(point.id) || point.id < 1) throw new ApiError('Invalid route endpoint.', { code: 'VALIDATION_ERROR', errorKey: 'routeError' });
   // Technical ids stay separate from cabinet numbers such as 01А or 06Б.
   return { building: point.building, floor: point.floor, id: point.id };
 }

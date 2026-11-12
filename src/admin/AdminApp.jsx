@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../components/Icon.jsx';
+import { loadBuildings } from '../api-client.js';
+import { buildingFloorName, makeTranslator } from '../i18n.js';
 import { ROOM_KK } from '../i18n.js';
 import { normalize } from '../map-core.js';
 import { getSession, authenticate, logout, getRooms, getRoomHistory, saveRoom } from './admin-client.js';
@@ -23,6 +25,18 @@ const TEXT = {
     UNAUTHORIZED:'Сессия аяқталды. Қайта кіріңіз.', INVALID_CREDENTIALS:'Құпиясөз қате.', FORBIDDEN:'Әрекет қолжетімсіз.', CSRF_INVALID:'Сессияны растау мүмкін болмады. Қайта кіріңіз.', SETUP_LOCAL_ONLY:'Алғашқы баптау тек сервер компьютерінде орындалады.', ALREADY_CONFIGURED:'Құпиясөз жасалған. Қолданыстағы құпиясөзбен кіріңіз.', VALIDATION_ERROR:'Кабинет нөмірі мен атауларын тексеріңіз.', DUPLICATE_NUMBER:'Осы корпус қабатында мұндай нөмір бар. Басқа нөмірді көрсетіңіз.', REVISION_CONFLICT:'Деректер басқа қойындыда өзгертілген.', RATE_LIMITED:'Тым көп әрекет жасалды. Біраз күтіп, қайталаңыз.', NOT_FOUND:'Бөлме табылмады. Тізімді жаңартыңыз.', NETWORK_ERROR:'Серверге қосылу мүмкін болмады. Байланысты тексеріп, қайталаңыз.', SERVER_ERROR:'Сервис уақытша қолжетімсіз. Қайталап көріңіз.', INVALID_RESPONSE:'Сервер дұрыс емес жауап қайтарды. Қайталап көріңіз.'
   }
 };
+const LEGACY_BUILDINGS = [
+  {id:'five',floors:[0,1,2,3,4,5]},
+  {id:'seven',floors:[1,2,3,4,5,6,7]},
+];
+const defaultFloor = floors => floors.includes(1) ? 1 : floors[0];
+
+function initialContext(buildings, params) {
+  const building = buildings.find(entry => entry.id === params.get('building')) ?? buildings.find(entry => entry.id === 'five');
+  const floor = Number(params.get('floor') ?? 1);
+  return {buildings,building:building.id,floor:building.floors.includes(floor) ? floor : defaultFloor(building.floors)};
+}
+
 const emptyDraft = () => ({number:'',labelRu:'',labelKk:''});
 const draftOf = room => ({number:room?.number??'',labelRu:room?.labelRu??room?.label??'',labelKk:room?.labelKk??''});
 const pointKey = room => room && `${room.building}:${room.floor}:${room.id}`;
@@ -33,8 +47,11 @@ export default function AdminApp() {
   const [language,setLanguage]=useState(safeLanguage);
   const translate=key=>TEXT[language][key]||TEXT[language].SERVER_ERROR;
   const params=useMemo(()=>new URLSearchParams(location.search),[]);
-  const [building,setBuilding]=useState(()=>params.get('building')==='seven'?'seven':'five');
-  const [floor,setFloor]=useState(()=>{const n=Number(params.get('floor')??1);return Number.isInteger(n)&&n>=0&&n<=(params.get('building')==='seven'?7:5)&&!(params.get('building')==='seven'&&n===0)?n:1;});
+  const [context,setContext]=useState(null);
+  const {buildings,building,floor}=context??initialContext(LEGACY_BUILDINGS,params);
+  const catalogReady=!!context;
+  const activeBuilding=buildings.find(entry=>entry.id===building);
+  const buildingName=entry=>entry.name?.[language]||translate(entry.id);
   const [session,setSession]=useState(null),[sessionError,setSessionError]=useState(''),[sessionAttempt,setSessionAttempt]=useState(0);
   const [password,setPassword]=useState(''),[confirmation,setConfirmation]=useState(''),[authBusy,setAuthBusy]=useState(false);
   const [rooms,setRooms]=useState([]),[revision,setRevision]=useState(''),[roomsBusy,setRoomsBusy]=useState(false),[roomsError,setRoomsError]=useState(''),[reload,setReload]=useState(0),[query,setQuery]=useState('');
@@ -44,7 +61,7 @@ export default function AdminApp() {
   const dirty=!!selected&&JSON.stringify(draft)!==JSON.stringify(draftOf(selected));
   const dirtyRef=useRef(dirty);dirtyRef.current=dirty||!!suspendedDraft.current?.dirty;
   const editorRef=useRef(null);editorRef.current={dirty,selected,draft,revision,building,floor};
-  const floorLabel=n=>n===0?translate('basement'):`${n} ${translate('floor')}`;
+  const floorLabel=n=>buildingFloorName(makeTranslator(language),building,n);
   const mapHref=`/?${new URLSearchParams({building,floor:String(floor),lang:language})}`;
   const selectedKey=pointKey(selected);
   const previewKk=draft.labelKk||ROOM_KK[draft.labelRu]||draft.labelRu;
@@ -77,6 +94,13 @@ export default function AdminApp() {
     getSession({signal:controller.signal}).then(({data})=>{if(!controller.signal.aborted)setSession(data);}).catch(err=>{if(!controller.signal.aborted)setSessionError(err.code||'NETWORK_ERROR');});
     return()=>controller.abort();
   },[sessionAttempt]);
+  useEffect(()=>{
+    const controller=new AbortController();
+    loadBuildings({signal:controller.signal}).catch(()=>({data:LEGACY_BUILDINGS})).then(({data})=>{
+      if(!controller.signal.aborted)setContext(initialContext(data,params));
+    });
+    return()=>controller.abort();
+  },[params]);
 
   const expireSession=(err,preserve=true)=>{
     if(err.status===401||err.code==='CSRF_INVALID'){
@@ -85,7 +109,7 @@ export default function AdminApp() {
     }return false;
   };
   useEffect(()=>{
-    if(!session?.authenticated)return;
+    if(!session?.authenticated||!catalogReady)return;
     const controller=new AbortController();setRoomsBusy(true);setRoomsError('');
     getRooms(building,floor,{signal:controller.signal}).then(({data,revision:nextRevision})=>{
       if(controller.signal.aborted)return;
@@ -97,7 +121,7 @@ export default function AdminApp() {
       }else{setRevision(nextRevision);setSelected(null);setDraft(emptyDraft());}
     }).catch(err=>{if(!controller.signal.aborted&&!expireSession(err))setRoomsError(err.code||'NETWORK_ERROR');}).finally(()=>{if(!controller.signal.aborted)setRoomsBusy(false);});
     return()=>controller.abort();
-  },[session?.authenticated,building,floor,reload]);
+  },[session?.authenticated,catalogReady,building,floor,reload]);
   useEffect(()=>{
     setHistory([]);setHistoryError(false);
     if(!selectedKey||!session?.authenticated){setHistoryBusy(false);return;}
@@ -119,7 +143,7 @@ export default function AdminApp() {
     finally{if(active.current&&!controller.signal.aborted)setAuthBusy(false);}
   }
   function chooseRoom(room){if(saving||!discardAllowed())return;setSelected(room);setDraft(draftOf(room));setMessage('');setError('');}
-  function changeContext(nextBuilding,nextFloor){if(saving||!discardAllowed())return;setSelected(null);setDraft(emptyDraft());setRooms([]);setBuilding(nextBuilding);setFloor(nextFloor);setQuery('');setMessage('');setError('');}
+  function changeContext(nextBuilding,nextFloor){if(!catalogReady||saving||!discardAllowed())return;setSelected(null);setDraft(emptyDraft());setRooms([]);setContext({buildings,building:nextBuilding,floor:nextFloor});setQuery('');setMessage('');setError('');}
   async function submitEdit(event){
     event.preventDefault();if(!selected||saving||!dirty)return;
     const cleaned={number:draft.number.trim(),labelRu:draft.labelRu.trim(),labelKk:draft.labelKk.trim()};
@@ -152,10 +176,16 @@ export default function AdminApp() {
     <header className="admin-header"><a className="admin-brand" href={mapHref} onClick={guardMapNavigation}><img src="/assets/hdu-logo.png" alt="ХДУ" width="48" height="48"/><span><b>ХДУ<span>.</span></b><small>{translate('title')}</small></span></a><div className="admin-header-actions"><a className="admin-map-link" href={mapHref} onClick={guardMapNavigation}><Icon type="arrow"/>{translate('back')}</a><div className="language-switch" role="group" aria-label={translate('language')}>{[['kk','ҚАЗ'],['ru','РУС']].map(([lang,label])=><button type="button" key={lang} lang={lang} aria-pressed={language===lang} className={language===lang?'active':''} onClick={()=>setLanguage(lang)}>{label}</button>)}</div>{session?.authenticated&&<button id="adminLogout" type="button" disabled={saving||authBusy} onClick={signOut}>{translate('logout')}</button>}</div></header>
     {!session?<main className="admin-auth"><section className="admin-auth-card"><img src="/assets/hdu-logo.png" width="64" height="64" alt="ХДУ"/><h1>{translate('title')}</h1><p role={sessionError?'alert':'status'}>{sessionError?errorText(sessionError):translate('loading')}</p>{sessionError&&<button type="button" id="adminSessionRetry" className="primary" onClick={()=>setSessionAttempt(value=>value+1)}>{translate('retry')}</button>}</section></main>:!session.authenticated?<main className="admin-auth"><section className="admin-auth-card"><span className="admin-kicker">ХДУ · {translate('subtitle')}</span><h1>{translate(session.configured?'login':'setup')}</h1><p>{translate(session.configured?'loginHint':session.canSetup?'setupHint':'noSetup')}</p>{(session.configured||session.canSetup)&&<form id="adminAuthForm" onSubmit={submitAuth}><label htmlFor="adminPassword">{translate('password')}</label><input id="adminPassword" type="password" autoComplete={session.configured?'current-password':'new-password'} minLength={session.configured?undefined:12} maxLength={128} required value={password} onChange={event=>setPassword(event.target.value)} disabled={authBusy}/>{!session.configured&&<><label htmlFor="adminPasswordConfirm">{translate('passwordAgain')}</label><input id="adminPasswordConfirm" type="password" autoComplete="new-password" minLength={12} maxLength={128} required value={confirmation} onChange={event=>setConfirmation(event.target.value)} disabled={authBusy}/></>}<button id="adminSignIn" type="submit" className="primary" disabled={authBusy} aria-busy={authBusy}>{translate(authBusy?'signingIn':session.configured?'signIn':'create')}<Icon type="arrow"/></button></form>}{sessionError&&<p className="admin-error" role="alert">{errorText(sessionError)}</p>}</section></main>:<main className="admin-workspace">
       <section className="admin-page-heading"><div><p className="admin-kicker">ХДУ · {translate('title')}</p><h1>{translate('subtitle')}</h1></div><span className="admin-count">{rooms.length} {translate('rooms').toLowerCase()}</span></section>
-      <section className="admin-filters" aria-label={translate('rooms')}><div className="admin-corpora" role="group" aria-label={translate('buildings')}>{['five','seven'].map(value=><button key={value} type="button" aria-pressed={building===value} className={building===value?'active':''} disabled={saving} onClick={()=>{if(value!==building)changeContext(value,1);}}><Icon type={value}/>{translate(value)}</button>)}</div><label className="admin-floor-select">{translate('floorChoice')}<select id="adminFloor" value={floor} disabled={saving} onChange={event=>changeContext(building,Number(event.target.value))}>{Array.from({length:building==='five'?6:7},(_,index)=>building==='five'?index:index+1).map(value=><option key={value} value={value}>{floorLabel(value)}</option>)}</select></label><label className="admin-search-label"><Icon type="search"/><input id="adminRoomSearch" type="search" maxLength={120} aria-label={translate('search')} placeholder={translate('search')} value={query} onChange={event=>setQuery(event.target.value)}/></label></section>
+      <section className="admin-filters" aria-label={translate('rooms')}>
+        <div className="admin-corpora" role="group" aria-label={translate('buildings')}>
+          {buildings.map(entry=><button key={entry.id} type="button" aria-pressed={building===entry.id} className={building===entry.id?'active':''} disabled={saving||!catalogReady} onClick={()=>{if(entry.id!==building)changeContext(entry.id,defaultFloor(entry.floors));}}><Icon type={entry.id}/>{buildingName(entry)}</button>)}
+        </div>
+        <label className="admin-floor-select">{translate('floorChoice')}<select id="adminFloor" value={floor} disabled={saving||!catalogReady} onChange={event=>changeContext(building,Number(event.target.value))}>{activeBuilding.floors.map(value=><option key={value} value={value}>{floorLabel(value)}</option>)}</select></label>
+        <label className="admin-search-label"><Icon type="search"/><input id="adminRoomSearch" type="search" maxLength={120} aria-label={translate('search')} placeholder={translate('search')} value={query} onChange={event=>setQuery(event.target.value)}/></label>
+      </section>
       {message&&<p id="adminSuccess" className="admin-success" role="status">{translate(message)}</p>}
-      <div className="admin-columns"><section className="admin-room-list-panel"><div className="admin-section-heading"><h2>{translate('rooms')}</h2><span>{translate('count')}: {visibleRooms.length}</span></div>{roomsBusy?<p className="admin-empty" role="status">{translate('loading')}</p>:roomsError?<div className="admin-empty"><p className="admin-error" role="alert">{errorText(roomsError)}</p><button type="button" onClick={()=>setReload(value=>value+1)}>{translate('retry')}</button></div>:<div className="admin-room-list" role="group" aria-label={translate('rooms')}>{visibleRooms.map(room=><button key={pointKey(room)} type="button" className={`admin-room-row${pointKey(room)===selectedKey?' active':''}`} aria-pressed={pointKey(room)===selectedKey} disabled={saving} data-admin-room={room.id} onClick={()=>chooseRoom(room)}><span className="admin-room-icon"><Icon type={room.type==='stair'?'stair':room.type==='wc'?'wc':'room'}/></span><span className="admin-room-copy"><b>{room.number?`${translate('cabinet')} ${room.number}`:room.labelRu||room.label}</b><small>{room.labelRu||room.label}</small>{room.labelKk&&<small lang="kk">{room.labelKk}</small>}</span><span className="admin-plan-id">ID {room.id}</span></button>)}{!visibleRooms.length&&<p className="admin-empty">{translate('noRooms')}</p>}</div>}</section>
-        <section className="admin-editor" aria-label={translate('editing')}>{!selected?<div className="admin-editor-placeholder"><Icon type="room"/><p>{translate('select')}</p></div>:<><div className="admin-editor-heading"><div><p className="admin-kicker">{translate(building)} · {floorLabel(floor)}</p><h2>{translate('editing')}</h2></div><span className="admin-id-badge">{translate('planId')}: {selected.id}</span></div><form id="adminEditForm" onSubmit={submitEdit} aria-busy={saving}><label htmlFor="adminRoomNumber">{translate('number')}</label><input id="adminRoomNumber" aria-describedby="adminNumberHint" type="text" autoComplete="off" maxLength={24} value={draft.number} onChange={event=>{setDraft(current=>({...current,number:event.target.value}));setMessage('');}} disabled={saving}/><small id="adminNumberHint">{translate('numberHint')}</small><label htmlFor="adminLabelRu">{translate('ru')} <span aria-hidden="true">*</span></label><input id="adminLabelRu" lang="ru" type="text" maxLength={120} required value={draft.labelRu} onChange={event=>{setDraft(current=>({...current,labelRu:event.target.value}));setMessage('');}} disabled={saving}/><label htmlFor="adminLabelKk">{translate('kk')}</label><input id="adminLabelKk" lang="kk" type="text" maxLength={120} value={draft.labelKk} onChange={event=>{setDraft(current=>({...current,labelKk:event.target.value}));setMessage('');}} disabled={saving}/><small>{translate('kkHint')}</small><div className="admin-label-preview"><span>{translate('preview')}</span><div><small>{translate('previewRu')}</small><b>{draft.number?`${translate('cabinet')} ${draft.number}`:draft.labelRu||'—'}</b><p lang="ru">{draft.labelRu||'—'}</p></div><div><small>{translate('previewKk')}</small><b>{draft.number?`${draft.number}-кабинет`:previewKk||'—'}</b><p lang="kk">{previewKk||'—'}</p></div></div><div className="admin-form-actions"><button id="adminSave" className="primary" type="submit" disabled={saving||!dirty}>{translate(saving?'saving':'save')}<Icon type="arrow"/></button><button id="adminCancel" type="button" disabled={saving||!dirty} onClick={()=>{if(discardAllowed()){setDraft(draftOf(selected));setError('');}}}>{translate('cancel')}</button></div>{dirty&&<p className="admin-dirty" role="status">{translate('unsaved')}</p>}{error&&<div className="admin-error" role="alert"><p>{errorText(error)}</p>{error==='REVISION_CONFLICT'&&<><p>{translate('conflictHint')}</p><button id="adminReloadConflict" type="button" onClick={()=>{if(discardAllowed()){setSelected(null);setDraft(emptyDraft());setError('');setReload(value=>value+1);}}}>{translate('reload')}</button></>}</div>}</form><section className="admin-history"><h3>{translate('history')}</h3>{historyBusy?<p role="status">{translate('loading')}</p>:historyError?<div><p>{translate('historyError')}</p><button type="button" onClick={()=>setHistoryAttempt(value=>value+1)}>{translate('retry')}</button></div>:history.length?<ol>{history.map(item=><li key={item.id}><time dateTime={item.createdAt}>{formatDate(item.createdAt,language)}</time><div className="admin-history-diff"><div><small>{translate('before')}</small>{renderChanges(item.before)}</div><Icon type="arrow"/><div><small>{translate('after')}</small>{renderChanges(item.after)}</div></div></li>)}</ol>:<p>{translate('noHistory')}</p>}</section></>}</section>
+      <div className="admin-columns"><section className="admin-room-list-panel"><div className="admin-section-heading"><h2>{translate('rooms')}</h2><span>{translate('count')}: {visibleRooms.length}</span></div>{!catalogReady||roomsBusy?<p className="admin-empty" role="status">{translate('loading')}</p>:roomsError?<div className="admin-empty"><p className="admin-error" role="alert">{errorText(roomsError)}</p><button type="button" onClick={()=>setReload(value=>value+1)}>{translate('retry')}</button></div>:<div className="admin-room-list" role="group" aria-label={translate('rooms')}>{visibleRooms.map(room=><button key={pointKey(room)} type="button" className={`admin-room-row${pointKey(room)===selectedKey?' active':''}`} aria-pressed={pointKey(room)===selectedKey} disabled={saving} data-admin-room={room.id} onClick={()=>chooseRoom(room)}><span className="admin-room-icon"><Icon type={room.type==='stair'?'stair':room.type==='wc'?'wc':'room'}/></span><span className="admin-room-copy"><b>{room.number?`${translate('cabinet')} ${room.number}`:room.labelRu||room.label}</b><small>{room.labelRu||room.label}</small>{room.labelKk&&<small lang="kk">{room.labelKk}</small>}</span><span className="admin-plan-id">ID {room.id}</span></button>)}{!visibleRooms.length&&<p className="admin-empty">{translate('noRooms')}</p>}</div>}</section>
+        <section className="admin-editor" aria-label={translate('editing')}>{!selected?<div className="admin-editor-placeholder"><Icon type="room"/><p>{translate('select')}</p></div>:<><div className="admin-editor-heading"><div><p className="admin-kicker">{buildingName(activeBuilding)} · {floorLabel(floor)}</p><h2>{translate('editing')}</h2></div><span className="admin-id-badge">{translate('planId')}: {selected.id}</span></div><form id="adminEditForm" onSubmit={submitEdit} aria-busy={saving}><label htmlFor="adminRoomNumber">{translate('number')}</label><input id="adminRoomNumber" aria-describedby="adminNumberHint" type="text" autoComplete="off" maxLength={24} value={draft.number} onChange={event=>{setDraft(current=>({...current,number:event.target.value}));setMessage('');}} disabled={saving}/><small id="adminNumberHint">{translate('numberHint')}</small><label htmlFor="adminLabelRu">{translate('ru')} <span aria-hidden="true">*</span></label><input id="adminLabelRu" lang="ru" type="text" maxLength={120} required value={draft.labelRu} onChange={event=>{setDraft(current=>({...current,labelRu:event.target.value}));setMessage('');}} disabled={saving}/><label htmlFor="adminLabelKk">{translate('kk')}</label><input id="adminLabelKk" lang="kk" type="text" maxLength={120} value={draft.labelKk} onChange={event=>{setDraft(current=>({...current,labelKk:event.target.value}));setMessage('');}} disabled={saving}/><small>{translate('kkHint')}</small><div className="admin-label-preview"><span>{translate('preview')}</span><div><small>{translate('previewRu')}</small><b>{draft.number?`${translate('cabinet')} ${draft.number}`:draft.labelRu||'—'}</b><p lang="ru">{draft.labelRu||'—'}</p></div><div><small>{translate('previewKk')}</small><b>{draft.number?`${draft.number}-кабинет`:previewKk||'—'}</b><p lang="kk">{previewKk||'—'}</p></div></div><div className="admin-form-actions"><button id="adminSave" className="primary" type="submit" disabled={saving||!dirty}>{translate(saving?'saving':'save')}<Icon type="arrow"/></button><button id="adminCancel" type="button" disabled={saving||!dirty} onClick={()=>{if(discardAllowed()){setDraft(draftOf(selected));setError('');}}}>{translate('cancel')}</button></div>{dirty&&<p className="admin-dirty" role="status">{translate('unsaved')}</p>}{error&&<div className="admin-error" role="alert"><p>{errorText(error)}</p>{error==='REVISION_CONFLICT'&&<><p>{translate('conflictHint')}</p><button id="adminReloadConflict" type="button" onClick={()=>{if(discardAllowed()){setSelected(null);setDraft(emptyDraft());setError('');setReload(value=>value+1);}}}>{translate('reload')}</button></>}</div>}</form><section className="admin-history"><h3>{translate('history')}</h3>{historyBusy?<p role="status">{translate('loading')}</p>:historyError?<div><p>{translate('historyError')}</p><button type="button" onClick={()=>setHistoryAttempt(value=>value+1)}>{translate('retry')}</button></div>:history.length?<ol>{history.map(item=><li key={item.id}><time dateTime={item.createdAt}>{formatDate(item.createdAt,language)}</time><div className="admin-history-diff"><div><small>{translate('before')}</small>{renderChanges(item.before)}</div><Icon type="arrow"/><div><small>{translate('after')}</small>{renderChanges(item.after)}</div></div></li>)}</ol>:<p>{translate('noHistory')}</p>}</section></>}</section>
       </div>{error&&!selected&&<p className="admin-error" role="alert">{errorText(error)}</p>}
     </main>}
   </div>;

@@ -9,7 +9,7 @@ const COOKIE = 'hdu_admin_session';
 const SESSION_MS = 8 * 60 * 60 * 1000;
 const AUTH_WINDOW_MS = 10 * 60 * 1000;
 const BODY_LIMIT = 8192;
-const ROOM_FIELDS = ['id','number','label','labelRu','labelKk','type','x','y','w','h','cx','cy','points','start','door','partial'];
+const ROOM_FIELDS = ['id','number','label','labelRu','labelKk','type','x','y','w','h','cx','cy','points','polygons','start','door','partial'];
 const own = (value, key) => value && Object.prototype.hasOwnProperty.call(value, key);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 class AdminError extends Error {
@@ -174,7 +174,7 @@ export function createAdminHandler({repository,logger,publicOrigin} = {}) {
     return timingSafeEqual(actual,Buffer.from(digest,'hex'));
   }
   function pointIdentifiers(building,floor,id) {
-    if (!['five','seven'].includes(building)) fail(404,'NOT_FOUND','Room was not found.');
+    if (!own(repository.getMaps(),building)) fail(404,'NOT_FOUND','Room was not found.');
     return {building,floor:integer(floor),id:integer(id,1)};
   }
   const handler = async (req,res,url) => {
@@ -214,12 +214,14 @@ export function createAdminHandler({repository,logger,publicOrigin} = {}) {
       } else if (endpoint === 'rooms') {
         requireSession(req);
         const query = parsed.searchParams;
-        let catalog = buildCatalog(repository.getMaps());
+        const maps = repository.getMaps();
+        let catalog = buildCatalog(maps);
         const building = query.get('building'), floor = query.has('floor')?integer(query.get('floor')):undefined;
-        if (building !== null && !['five','seven'].includes(building)) fail(400,'INVALID_QUERY','Invalid building filter.');
+        if (building !== null && !own(maps,building)) fail(400,'INVALID_QUERY','Invalid building filter.');
         if (building !== null) catalog=catalog.filter(room=>room.building===building);
         if (floor !== undefined) {
-          if (!catalog.some(room=>room.floor===floor)) fail(400,'INVALID_QUERY','Invalid floor filter.');
+          const buildings = building === null ? Object.values(maps) : [maps[building]];
+          if (!buildings.some(map=>own(map.floors,floor))) fail(400,'INVALID_QUERY','Invalid floor filter.');
           catalog=catalog.filter(room=>room.floor===floor);
         }
         const q=query.get('q')||'';

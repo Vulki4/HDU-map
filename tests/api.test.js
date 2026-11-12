@@ -38,8 +38,9 @@ function streamRequest(path,chunks,headers={}){
 test('public map and floor responses whitelist geometry without areas or source provenance',async()=>{
   const result=await request('/api/v1/maps');
   assert.equal(result.response.status,200);assert.equal(result.body.revision,revision);
-  assert.equal(Object.values(result.body.data).flatMap(map=>Object.keys(map.floors)).length,13);
-  assert.equal(buildCatalog(result.body.data).length,170);noPrivateFields(result.body);
+  const { five, seven } = result.body.data;
+  assert.equal([five,seven].flatMap(map=>Object.keys(map.floors)).length,13);
+  assert.equal(buildCatalog({five,seven}).length,170);noPrivateFields(result.body);
   assert.deepEqual(result.body.data.five.floors[0].view,seed.five.floors[0].view);
   assert.ok(result.response.headers.get('etag'));assert.equal(result.response.headers.get('cache-control'),'no-cache');
   const floor=await request('/api/v1/buildings/five/floors/0');
@@ -51,17 +52,49 @@ test('public map and floor responses whitelist geometry without areas or source 
 
 test('building metadata, HEAD, ETags and conditional floor requests follow HTTP semantics',async()=>{
   const buildings=await request('/api/v1/buildings');
-  assert.equal(buildings.response.status,200);assert.equal(buildings.body.data.length,2);
+  assert.equal(buildings.response.status,200);
+  assert.deepEqual(buildings.body.data.map(building=>building.id),Object.keys(seed));
   const five=buildings.body.data.find(building=>building.id==='five');
   assert.deepEqual(five.floors,[0,1,2,3,4,5]);assert.deepEqual(five.name,{ru:'А корпус',kk:'А корпусы'});
   const seven=buildings.body.data.find(building=>building.id==='seven');
   assert.deepEqual(seven.floors,[1,2,3,4,5,6,7]);
+  if(seed.udn2){
+    const udn2=buildings.body.data.find(building=>building.id==='udn2');
+    assert.deepEqual(udn2.name,{ru:'УДН 2',kk:'УДН 2'});
+    assert.deepEqual(udn2.floors,Object.keys(seed.udn2.floors).map(Number).sort((a,b)=>a-b));
+  }
   const first=await request('/api/v1/buildings/seven/floors/7');
   const etag=first.response.headers.get('etag');
   const cached=await request('/api/v1/buildings/seven/floors/7',{headers:{'If-None-Match':`W/${etag}`}});
   assert.equal(cached.response.status,304);assert.equal(cached.text,'');
   const head=await request('/api/v1/maps',{method:'HEAD'});
   assert.equal(head.response.status,200);assert.equal(head.text,'');assert.ok(Number(head.response.headers.get('content-length'))>0);
+});
+
+test('buildings without verified routing still expose plans and support room search',async()=>{
+  const catalogWithUdn2 = { ...seed, udn2: { ...seed.five, name: 'УДН 2', routingAvailable: false } };
+  const { instance, url } = await start({ getMaps: () => catalogWithUdn2, getRevision: () => revision });
+  try {
+    const bootstrap = await fetch(url + '/api/v1/maps');
+    assert.equal(bootstrap.status, 200);
+    assert.equal((await bootstrap.json()).data.udn2.routingAvailable, false);
+    const rooms = await fetch(url + '/api/v1/search?building=udn2');
+    assert.equal(rooms.status, 200);
+    assert.ok((await rooms.json()).data.length > 0);
+    const candidates = await fetch(url + '/api/v1/search?building=udn2&routeOnly=true');
+    assert.equal(candidates.status, 200);
+    assert.deepEqual((await candidates.json()).data, []);
+    const response = await fetch(url + '/api/v1/routes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: { ...point(from), building: 'udn2' }, to: { ...point(to), building: 'udn2' } }),
+    });
+    assert.equal(response.status, 422);
+    assert.equal((await response.json()).error.code, 'NO_ROUTE');
+  } finally {
+    instance.closeIdleConnections();
+    await new Promise(resolve => instance.close(resolve));
+  }
 });
 
 test('global bilingual search ranks context without filtering other floors or corpora',async()=>{

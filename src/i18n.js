@@ -7,6 +7,9 @@ export const I18N = {
     title: 'ХДУ — Карта кампуса', brand: 'КАРТА КАМПУСА', brandAria: 'ХДУ — карта кампуса', logo: 'Логотип университета',
     searchPlaceholder: 'Найти кабинет, например 211 или 01А', searchAria: 'Поиск по кабинетам', searchHint: 'Номер кабинета или название', results: 'Результаты поиска',
     about: 'О карте', theme: 'Сменить тему', languages: 'Язык интерфейса', buildings: 'Выбор корпуса', five: 'А корпус', seven: 'Б корпус',
+    udn2: 'УДН 2', groundFloor: 'Цокольный этаж', groundFloorShort: 'Ц', attic: 'Мансарда', atticShort: 'М',
+    planIdShort: '№{n}', buildingRoutingUnavailable: 'Маршруты для этого здания пока недоступны.',
+    udn2About: 'УДН 2 включает цокольный этаж, этажи 1–3 и мансарду. На схемах указаны номера помещений по техпаспорту.',
     mapAria: 'Интерактивная карта корпуса', floorMap: 'ПОЭТАЖНАЯ КАРТА', floors: 'Выбор этажа', basement: 'Подвал', basementShort: 'П',
     floor: '{n} этаж', floorShort: '{n} эт.', floorCaption: 'Этаж', close: 'Закрыть окно', closeCard: 'Закрыть карточку',
     selectedRoom: 'Выбранное помещение', selectedRoomKicker: 'ПОМЕЩЕНИЕ', plus: 'Увеличить', minus: 'Уменьшить', fit: 'Вписать карту', hint: 'Колёсико мыши — масштаб · перетаскивание — перемещение', mapHint: 'Выберите кабинет на карте или воспользуйтесь поиском',
@@ -37,6 +40,9 @@ export const I18N = {
     title: 'ХДУ — Кампус картасы', brand: 'КАМПУС КАРТАСЫ', brandAria: 'ХДУ — кампус картасы', logo: 'Университет логотипі',
     searchPlaceholder: 'Кабинетті іздеу, мысалы 211 немесе 01А', searchAria: 'Кабинеттерді іздеу', searchHint: 'Кабинет нөмірі немесе бөлме атауы', results: 'Іздеу нәтижелері',
     about: 'Карта туралы', theme: 'Түс режимін ауыстыру', languages: 'Интерфейс тілі', buildings: 'Корпусты таңдау', five: 'А корпусы', seven: 'Б корпусы',
+    udn2: 'УДН 2', groundFloor: 'Цоколь қабаты', groundFloorShort: 'Ц', attic: 'Мансарда', atticShort: 'М',
+    planIdShort: '№{n}', buildingRoutingUnavailable: 'Бұл ғимаратта бағыт құру әзірге қолжетімсіз.',
+    udn2About: 'УДН 2 ғимаратында цоколь қабаты, 1–3-қабаттар және мансарда бар. Сызбаларда техникалық паспорттағы бөлме нөмірлері көрсетілген.',
     mapAria: 'Корпустың интерактивті картасы', floorMap: 'ҚАБАТТАР КАРТАСЫ', floors: 'Қабатты таңдау', basement: 'Жертөле', basementShort: 'Ж',
     floor: '{n}-қабат', floorShort: '{n}-қаб.', floorCaption: 'Қабат', close: 'Терезені жабу', closeCard: 'Карточканы жабу',
     selectedRoom: 'Таңдалған бөлме', selectedRoomKicker: 'БӨЛМЕ', plus: 'Үлкейту', minus: 'Кішірейту', fit: 'Картаны толық көрсету', hint: 'Тінтуір дөңгелегі — масштаб · сүйреу — жылжыту', mapHint: 'Кабинетті картадан таңдаңыз немесе іздеуді пайдаланыңыз',
@@ -79,4 +85,13 @@ export function makeTranslator(language = 'ru') {
       : Object.prototype.hasOwnProperty.call(I18N.ru, key) ? I18N.ru[key] : String(key);
     return template.replace(/\{(\w+)\}/g, (_, token) => String(values?.[token] ?? ''));
   };
+}
+
+export function buildingFloorName(t, building, floor, short = false) {
+  if (building === 'udn2') {
+    if (floor === 0) return t(short ? 'groundFloorShort' : 'groundFloor');
+    if (floor === 4) return t(short ? 'atticShort' : 'attic');
+  }
+  if (floor === 0) return t(short ? 'basementShort' : 'basement');
+  return short ? String(floor) : t('floor', { n: floor });
 }

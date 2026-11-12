@@ -19,6 +19,7 @@ const shapes = {
   terrace: <path d="M3 21h18M5 21v-7m7 7V4m7 17v-7M3 14h18M6 7h12l-6-4-6 4Z" />,
   five: <path d="M4 21V8h16v13M2 21h20M8 8V3h8v5M8 12h1m6 0h1m-8 4h1m6 0h1m-5 5v-4h2v4" />,
   seven: <path d="M5 21V7l7-4 7 4v14M2 21h20M9 21v-5h6v5M9 8h1m4 0h1m-6 4h1m4 0h1" />,
+  udn2: <path d="M4 21V9l8-6 8 6v12M2 21h20M4 9h16M10 21v-4h4v4M8 12h1m6 0h1m-4-6h.01" />,
   sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></>,
   moon: <path d="M20 15.3A8.5 8.5 0 0 1 8.7 4a8.5 8.5 0 1 0 11.3 11.3Z" />,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10v1" /></>,

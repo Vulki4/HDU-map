@@ -49,6 +49,7 @@ export function findRoute(maps, building, fromF, fromId, toF, toId) {
   const fail = errorKey => ({ ...result, ok: false, errorKey });
   if (!maps || !Object.prototype.hasOwnProperty.call(maps, building)) return fail('noRoute');
   const map = maps[building];
+  if (map.routingAvailable === false) return fail('noRoute');
   if (![fromF, fromId, toF, toId].every(Number.isInteger)) return fail('chooseBoth');
   const source = map.floors[fromF]?.rooms.find(room => room.id === fromId);
   const destination = map.floors[toF]?.rooms.find(room => room.id === toId);

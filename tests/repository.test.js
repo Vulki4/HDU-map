@@ -21,13 +21,14 @@ function temporaryDatabase(t) {
   return filename;
 }
 
-test('SQLite repository restores all 170 rooms and 13 floors without changing internal values', () => {
+test('SQLite repository restores the complete seed and preserves the original 170 rooms and 13 floors', () => {
   const repository = createMapRepository({ filename: ':memory:' });
   try {
     const maps = repository.getMaps();
     assert.deepEqual(maps, MAPS);
-    assert.equal(Object.values(maps).flatMap(map => Object.values(map.floors)).length, 13);
-    assert.equal(Object.values(maps).flatMap(map => Object.values(map.floors).flatMap(floor => floor.rooms)).length, 170);
+    const originalFloors = [maps.five, maps.seven].flatMap(map => Object.values(map.floors));
+    assert.equal(originalFloors.length, 13);
+    assert.equal(originalFloors.flatMap(floor => floor.rooms).length, 170);
     assert.equal(repository.getRevision(), createHash('sha256').update(JSON.stringify(MAPS)).digest('hex'));
     maps.five.floors[0].rooms[0].label = 'client mutation';
     assert.deepEqual(repository.getMaps(), MAPS);

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import MAPS from '../src/data.js';
 
 const SCHEMA_VERSION = '2';
+const UDN2_MERGE_REVISION = 'udn2_merged_room_revision';
 const dataDirectory = fileURLToPath(new URL('../var/', import.meta.url));
 const contained = (root, target) => { const relative = path.relative(root, target); return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)); };
 function canonicalPath(filename) {
@@ -88,7 +89,23 @@ function textField(value, { required = false, max }) {
 const numberKey = value => String(value ?? '').toLowerCase().replaceAll('ё', 'е').replaceAll('a', 'а').replaceAll('b', 'б').trim();
 const editableFields = room => ({ number: room.number ?? '', labelRu: room.labelRu ?? room.label, labelKk: room.labelKk ?? '' });
 
-function seedDatabase(db, seed) {
+function insertBuilding(db, building, position, { floors, ...buildingData }) {
+  db.prepare('INSERT INTO buildings(id,position,data_json) VALUES(?,?,?)').run(building, position, JSON.stringify(buildingData));
+  const floorInsert = db.prepare('INSERT INTO floors(building_id,floor_number,position,data_json) VALUES(?,?,?,?)');
+  const roomInsert = db.prepare('INSERT INTO rooms(building_id,floor_number,room_id,position,number,data_json) VALUES(?,?,?,?,?,?)');
+  Object.entries(floors).forEach(([floorKey, data], floorIndex) => {
+    const floor = Number(floorKey), { rooms, ...floorData } = data;
+    if (!Number.isInteger(floor)) throw new TypeError('Floor keys must be integers');
+    floorInsert.run(building, floor, floorIndex, JSON.stringify(floorData));
+    rooms.forEach((room, roomIndex) => {
+      if (!Number.isInteger(room.id)) throw new TypeError('Room IDs must be integers');
+      if (room.number !== undefined && typeof room.number !== 'string') throw new TypeError('Cabinet numbers must be strings to preserve leading zeroes and suffixes');
+      roomInsert.run(building, floor, room.id, roomIndex, room.number ?? null, JSON.stringify(room));
+    });
+  });
+}
+
+function seedDatabase(db, seed, udn2MergeRevision) {
   const revision = createHash('sha256').update(JSON.stringify(seed)).digest('hex');
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -98,34 +115,26 @@ function seedDatabase(db, seed) {
     metadata.run('schema_version', SCHEMA_VERSION);
     metadata.run('dataset_revision', revision);
     metadata.run('seeded_at', new Date().toISOString());
-    const buildingInsert = db.prepare('INSERT INTO buildings(id,position,data_json) VALUES(?,?,?)');
-    const floorInsert = db.prepare('INSERT INTO floors(building_id,floor_number,position,data_json) VALUES(?,?,?,?)');
-    const roomInsert = db.prepare('INSERT INTO rooms(building_id,floor_number,room_id,position,number,data_json) VALUES(?,?,?,?,?,?)');
-    Object.entries(seed).forEach(([building, map], buildingIndex) => {
-      const { floors, ...buildingData } = map;
-      buildingInsert.run(building, buildingIndex, JSON.stringify(buildingData));
-      Object.entries(floors).forEach(([floorKey, data], floorIndex) => {
-        const floor = Number(floorKey), { rooms, ...floorData } = data;
-        if (!Number.isInteger(floor)) throw new TypeError('Floor keys must be integers');
-        floorInsert.run(building, floor, floorIndex, JSON.stringify(floorData));
-        rooms.forEach((room, roomIndex) => {
-          if (!Number.isInteger(room.id)) throw new TypeError('Room IDs must be integers');
-          if (room.number !== undefined && typeof room.number !== 'string') throw new TypeError('Cabinet numbers must be strings to preserve leading zeroes and suffixes');
-          roomInsert.run(building, floor, room.id, roomIndex, room.number ?? null, JSON.stringify(room));
-        });
-      });
-    });
+    if (udn2MergeRevision) metadata.run(UDN2_MERGE_REVISION, udn2MergeRevision);
+    Object.entries(seed).forEach(([building, map], position) => insertBuilding(db, building, position, map));
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
 export function createMapRepository({ filename = path.join(dataDirectory, 'hdu-map.sqlite'), seed = MAPS } = {}) {
+  const udn2RoomMerges = Object.entries(seed.udn2?.floors ?? {}).flatMap(([floor, data]) =>
+    data.rooms.filter(room => ['corridor', 'wc'].includes(room.type) && room.mergedRoomIds?.length)
+      .map(room => ({ floor: Number(floor), room })),
+  );
+  const udn2MergeRevision = udn2RoomMerges.length
+    ? createHash('sha256').update(JSON.stringify(udn2RoomMerges)).digest('hex')
+    : null;
   const db = new DatabaseSync(databasePath(filename));
   let closed = false;
   try {
     db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row => row.name);
-    if (tables.length === 0) seedDatabase(db, seed);
+    if (tables.length === 0) seedDatabase(db, seed, udn2MergeRevision);
     else {
       if (!tables.includes('metadata')) throw new Error('Unsupported map database: schema_version metadata is missing');
       const version = db.prepare('SELECT value FROM metadata WHERE key=?').get('schema_version')?.value;
@@ -174,6 +183,89 @@ export function createMapRepository({ filename = path.join(dataDirectory, 'hdu-m
         }
         return maps;
     }
+    function refreshRevision() {
+      const nextRevision = createHash('sha256').update(JSON.stringify(getMaps())).digest('hex');
+      db.prepare('UPDATE metadata SET value=? WHERE key=?').run(nextRevision, 'dataset_revision');
+      return nextRevision;
+    }
+    if (seed.udn2 && tables.length > 0) {
+      const hasUdn2 = db.prepare('SELECT id FROM buildings WHERE id=?');
+      const needsRoomSync = () => udn2MergeRevision && revisionQuery.get(UDN2_MERGE_REVISION)?.value !== udn2MergeRevision;
+      if (!hasUdn2.get('udn2') || needsRoomSync()) {
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          let changed = false;
+          if (!hasUdn2.get('udn2')) {
+            const { position } = db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS position FROM buildings').get();
+            insertBuilding(db, 'udn2', position, seed.udn2);
+            changed = true;
+          } else if (needsRoomSync()) {
+            const moveHistory = db.prepare('UPDATE room_changes SET room_id=? WHERE building_id=? AND floor_number=? AND room_id=?');
+            const deleteRoom = db.prepare('DELETE FROM rooms WHERE building_id=? AND floor_number=? AND room_id=?');
+            // Match edits to the current label because the history can include retired rooms.
+            const labelEdits = db.prepare(`
+              SELECT
+                MAX(json_extract(before_json, '$.labelRu') IS NOT json_extract(after_json, '$.labelRu')
+                  AND json_extract(after_json, '$.labelRu') IS ?) AS ru,
+                MAX(json_extract(before_json, '$.labelKk') IS NOT json_extract(after_json, '$.labelKk')
+                  AND json_extract(after_json, '$.labelKk') IS ?) AS kk
+              FROM room_changes WHERE building_id=? AND floor_number=? AND room_id=?
+            `);
+            for (const { floor, room } of udn2RoomMerges) {
+              const retired = room.mergedRoomIds.flatMap(id => {
+                const record = roomQuery.get('udn2', floor, id);
+                return record ? [{ id, type: JSON.parse(record.data_json).type }] : [];
+              });
+              const main = roomQuery.get('udn2', floor, room.id);
+              const previous = main && recordRoom(main);
+              const edits = () => labelEdits.get(previous.labelRu ?? previous.label, previous.labelKk ?? '', 'udn2', floor, room.id);
+              if (!retired.length) {
+                if (previous?.type !== room.type || !Array.isArray(previous.polygons)) continue;
+                if (room.type === 'corridor' && Array.isArray(room.polygons) && JSON.stringify(previous.polygons) !== JSON.stringify(room.polygons)) {
+                  update.run(main.number, JSON.stringify({ ...previous, polygons: room.polygons }), 'udn2', floor, room.id);
+                  changed = true;
+                } else if (room.type === 'wc' && room.label === 'Туалет' && (previous.labelRu ?? previous.label) === 'Санузел') {
+                  const { ru, kk } = edits();
+                  const renamed = { ...previous };
+                  if (!ru) {
+                    renamed.label = room.label;
+                    if (previous.labelRu !== undefined || room.labelRu !== undefined) renamed.labelRu = room.labelRu ?? room.label;
+                  }
+                  if (!kk) renamed.labelKk = room.labelKk;
+                  if (JSON.stringify(previous) !== JSON.stringify(renamed)) {
+                    update.run(main.number, JSON.stringify(renamed), 'udn2', floor, room.id);
+                    changed = true;
+                  }
+                }
+                continue;
+              }
+              if (previous?.type !== room.type || retired.some(source => !Number.isSafeInteger(source.id) || source.id === room.id || source.type !== previous.type)) {
+                throw new Error('UDN 2 room merge did not match the stored plan');
+              }
+              const merged = { ...room, number: previous.number };
+              const { ru, kk } = room.type === 'wc' ? edits() : { ru: true, kk: true };
+              if (ru) {
+                merged.label = previous.label;
+                merged.labelRu = previous.labelRu;
+              }
+              if (kk) merged.labelKk = previous.labelKk;
+              update.run(main.number, JSON.stringify(merged), 'udn2', floor, room.id);
+              for (const { id } of retired) {
+                moveHistory.run(room.id, 'udn2', floor, id);
+                deleteRoom.run('udn2', floor, id);
+              }
+              changed = true;
+            }
+          }
+          if (udn2MergeRevision) {
+            db.prepare('INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+              .run(UDN2_MERGE_REVISION, udn2MergeRevision);
+          }
+          if (changed) refreshRevision();
+          db.exec('COMMIT');
+        } catch (error) { db.exec('ROLLBACK'); throw error; }
+      }
+    }
     return {
       getMaps,
       getRevision,
@@ -211,8 +303,7 @@ export function createMapRepository({ filename = path.join(dataDirectory, 'hdu-m
           const changed = { ...room, label: after.labelRu, labelRu: after.labelRu, labelKk: after.labelKk };
           if (after.number) changed.number = after.number; else delete changed.number;
           update.run(after.number || null, JSON.stringify(changed), building, floor, id);
-          const nextRevision = createHash('sha256').update(JSON.stringify(getMaps())).digest('hex');
-          db.prepare('UPDATE metadata SET value=? WHERE key=?').run(nextRevision, 'dataset_revision');
+          const nextRevision = refreshRevision();
           insertChange.run(building, floor, id, JSON.stringify(before), JSON.stringify(after), new Date().toISOString());
           db.exec('COMMIT');
           return { room: { ...changed, building, floor }, revision: nextRevision };
